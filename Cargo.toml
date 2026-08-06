@@ -1,0 +1,28 @@
+[package]
+name = "hyastro"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.86"
+description = "Strongly typed astronomical algorithms"
+license = "MIT"
+
+[features]
+default = ["std"]
+std = ["dep:garde"]
+
+[dependencies]
+garde = { version = "0.22", default-features = false, features = ["derive"], optional = true }
+libm = "0.2"
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+approx = "0.5"
+criterion = "0.8"
+mockall = "0.13"
+proptest = "1"
+rstest = "0.26"
+trybuild = "1"
+
+[[bench]]
+name = "math"
+harness = false

@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/vector_quantity_mismatch.rs:17:34
+   |
+17 |     let _ = position.checked_add(velocity);
+   |                      ----------- ^^^^^^^^ expected `Vector3<Icrs, Length>`, found `Vector3<Icrs, Speed>`
+   |                      |
+   |                      arguments to this method are incorrect
+   |
+   = note: expected struct `Vector3<Icrs, Length>`
+              found struct `Vector3<Icrs, Speed>`
+note: method defined here
+  --> src/math/vector.rs
+   |
+   |     pub fn checked_add(self, rhs: Self) -> Result<Self, Error> {
+   |            ^^^^^^^^^^^

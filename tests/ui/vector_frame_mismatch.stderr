@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/vector_frame_mismatch.rs:18:30
+   |
+18 |     let _ = icrs.checked_add(galactic);
+   |                  ----------- ^^^^^^^^ expected `Vector3<Icrs, Length>`, found `Vector3<Galactic, Length>`
+   |                  |
+   |                  arguments to this method are incorrect
+   |
+   = note: expected struct `Vector3<Icrs, Length>`
+              found struct `Vector3<Galactic, Length>`
+note: method defined here
+  --> src/math/vector.rs
+   |
+   |     pub fn checked_add(self, rhs: Self) -> Result<Self, Error> {
+   |            ^^^^^^^^^^^
