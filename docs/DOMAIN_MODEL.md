@@ -25,7 +25,7 @@ hyastro 的类型系统负责阻止单位、时间尺度、参考系、原点、
 | --- | --- | --- | --- |
 | `math` | 量、角语义、向量、点、方向、矩阵、旋转、球面几何、数值算法 | 无 | 值类型及其方法 |
 | `time` | 历法、日期、瞬间、时长、时间尺度、JD/MJD、闰秒、EOP 时间量 | `math` | `TimeContext` |
-| `frame` | 参考系统、参考架、原点、旋转、状态变换 | `math`、`time` | `Frames` |
+| `frame` | 参考系统、参考架、原点、状态、状态变换 | `math`、`time` | `Frames` |
 | `earth` | 旋转椭球、地理坐标、站点、地球定向链 | `math`、`time`、`frame` | `Earth` |
 | `ephem` | 天体、状态查询、覆盖、内核清单和段选择 | `math`、`time`、`frame` | `Ephemeris` |
 | `astro` | 星表位置、空间运动、天体测量位置、视位置和观测位置 | `time`、`frame`、`earth`、`ephem` | `Astrometry` |
@@ -76,41 +76,43 @@ pub struct Speed(f64);
 
 ### 3.2 空间、时间和变换
 
-常用静态语义使用封闭标记类型。标记 trait 由 hyastro 密封，外部代码无法伪造一个具有未知轴定义的参考系或时间尺度。
+常用静态语义使用封闭标记类型。天文参考系统和时间尺度的标记 trait 由 hyastro 密封；纯 `math` 值仍可携带调用者自有的幻影标签，但只有受检的 `frame` 标记能进入标准框架变换。
+
+计算坐标框架 `F` 绑定参考系统或具体参考架、原点、轴定义、手性和历元/分点元数据。原点是 `F` 的关联语义，不作为可与 `F` 任意组合的第二个类型参数。
 
 ```rust
-/// 在参考系 F 中表达、分量物理量为 Q 的自由向量
+/// 在计算坐标框架 F 中表达、分量物理量为 Q 的自由向量
 pub struct Vector3<F, Q> {
-    components: [f64; 3],
-    marker: PhantomData<fn() -> (F, Q)>,
+    components: [Q; 3],
+    marker: PhantomData<F>,
 }
 
-/// 在参考系 F、原点 O 下表达的三维位置点
-pub struct Point3<F, O> {
-    meters: [f64; 3],
-    marker: PhantomData<fn() -> (F, O)>,
+/// 在计算坐标框架 F 下表达的三维位置点；F 已绑定原点
+pub struct Point3<F> {
+    coordinates: Vector3<F, Length>,
 }
 
-/// 参考系 F 中经验证的单位方向
+/// 计算坐标框架 F 中经验证的单位方向
 pub struct Direction<F> {
     unit: Vector3<F, Dimensionless>,
 }
 
-/// 同一参考系、原点和历元下的位置速度状态
-pub struct State<F, O, S> {
-    position: Point3<F, O>,
+/// 同一计算坐标框架和历元下的位置速度状态
+pub struct State<F, S> {
+    position: Point3<F>,
     velocity: Vector3<F, Speed>,
     epoch: Instant<S>,
 }
 
-/// 从 From 到 To 的主动或被动约定已固定的旋转
+/// 把源坐标分量变换为目标坐标分量的旋转
 pub struct Rotation<From, To> {
     matrix: Matrix3,
     marker: PhantomData<fn(From) -> To>,
 }
 
-/// 包含旋转、平移和时间导数的六维状态变换
-pub struct StateTransform<From, To> {
+/// 在一个物理历元有效、包含旋转、平移和时间导数的状态变换
+pub struct StateTransform<From, To, S> {
+    epoch: Instant<S>,
     rotation: Rotation<From, To>,
     angular_velocity: Vector3<To, AngularSpeed>,
     translation: Vector3<To, Length>,
@@ -118,7 +120,16 @@ pub struct StateTransform<From, To> {
 }
 ```
 
-`Point3 - Point3` 仅产生同一 `F`、`O` 下的位移；`Point3 + Vector3<_, Length>` 产生点；两个点不相加。`Direction` 只能经有限且非零向量构造。`Rotation<A, B>` 只与 `Rotation<B, C>` 复合。
+`Point3 - Point3` 仅产生同一 `F` 下的位移；`Point3 + Vector3<_, Length>` 产生点；两个点不相加。`Direction` 只能经有限且非零向量构造。`Rotation<A, B>` 只与 `Rotation<B, C>` 复合，且只直接作用于自由向量和方向；点和状态必须通过含原点语义的 `StateTransform`。
+
+状态变换统一采用源分量到目标分量的被动坐标变换：
+
+```text
+r_to = R_from_to r_from + t
+v_to = R_from_to v_from + ω × (R_from_to r_from) + t_dot
+```
+
+`t` 是源原点相对目标原点的位置，以目标框架表达；`t_dot` 是该坐标的物理秒导数。`ω` 以目标框架表达，并定义为满足 `R_dot Rᵀ = [ω]×` 的轴向量。变换组合顺序为 `A→B` 后接 `B→C`。状态变换携带有效物理历元，应用和组合时必须核对历元值。
 
 时间核心类型如下：
 
@@ -128,10 +139,13 @@ pub struct StateTransform<From, To> {
 - `Duration`：两个瞬间之间的物理间隔，不携带时间尺度。
 - `JulianDate<S>`、`ModifiedJulianDate<S>`：保留双分量的连续日表示。
 - `Epoch<S>`：供坐标、星表或轨道参数引用的参考瞬间。
+- `LeapSeconds<'a>`：无分配、版本化的闰秒数据，显式保存起始偏移、覆盖范围和过期日；`LeapSecond` 只表示真正的 ±1 秒事件。
+- `EarthOrientationSample`：某个 UTC 标记物理瞬间的 `UT1−UTC`、LOD、`xp`、`yp`、`dX`、`dY` 强类型观测值。
+- `EarthOrientationTable<'a>`：不可变、版本化、带覆盖和过期边界的 EOP 数据；只在首末样本闭区间内线性插值，不外推；跨闰秒先插值连续的 `UT1−TAI`。
 
-时间尺度转换只由 `TimeContext::convert` 完成。`Instant<Utc>` 与 `Instant<Tt>` 没有直接 `From` 实现。UTC 日期时间标签允许合法的 `23:59:60`，其构造需要闰秒数据覆盖。
+尺度转换由目标类型发起：`Instant::<S>::from_instant(source, &model)` 证明模型覆盖后保留精确内部 TAI 坐标，`JulianDate::<S>::from_instant(source, &model)` 计算目标尺度数值。`TimeScaleModel<S>` 是密封能力 trait；普通 `TimeContext<NoEarthOrientation>` 只实现 UTC/TAI/TT/GPS，加入 `EarthOrientationTable` 后的上下文才实现 UT1，hifitime adapter 实现其支持的模型尺度。不存在无条件公开重标或直接跨尺度 `From`。UTC 日期时间标签允许合法的 `23:59:60`；`TimeContext::new` 接受显式 `LeapSeconds`，`TimeContext::builtin` 使用 IERS Bulletin C 72 快照。
 
-常用静态参考系统使用 `Icrs`、`Bcrs`、`Gcrs`、`Cirs`、`Tirs` 和 `Itrs` 标记。实际支持某个具体 ICRF/ITRF 实现时，为它定义具体标记类型。动态 SPICE 帧保持为适配器内的受检 `DynamicFrame`，只提供运行时检查的变换方法；确认轴、原点和时间语义完全匹配后才能转换到静态类型。
+常用静态计算坐标框架使用 `Icrs`、`Bcrs`、`Gcrs`、`Cirs`、`Tirs` 和 `Itrs` 标记；每个标记关联唯一原点和元数据。实际支持某个具体 ICRF/ITRF 实现时，为它定义单独的具体标记类型。动态 SPICE 帧保持为适配器内的受检 `DynamicFrame`，只提供运行时检查的变换方法；确认轴、原点和时间语义完全匹配后才能转换到静态类型。
 
 球面坐标按语义分开：
 
@@ -160,8 +174,8 @@ CatalogPlace<F>
 
 上下文是构造完成后不可变、可安全共享的算法输入。上下文不联网、不读取环境变量、不自动选择 latest 数据，也不依赖进程级可变状态。
 
-- `TimeContext` 拥有闰秒表、EOP 数据、插值策略和时间尺度模型，提供转换及差值查询。
-- `Frames` 拥有岁差章动、地球定向数据、动态参考架注册和变换路径，提供方向、位置与状态变换。
+- `TimeContext<'a, E>` 拥有闰秒策略，并用类型参数 `E` 表达 EOP 能力；`with_earth_orientation` 只接收已验证、不可变、版本化的 `EarthOrientationTable`。
+- `Frames` 借用同一个带 EOP 的 `TimeContext`；密封 `StateTransformModel<From, To, S>` 只为已实现的静态路径提供 `at` 和 `transform`，因此缺失路径在编译期失败。目前 CIRS→TIRS 由 UT1 ERA 和 LOD 角速度构造完整状态变换。
 - `Earth` 拥有椭球、站点和地球定向工作流，提供地理坐标及站点状态。
 - `Ephemeris` 拥有冻结顺序的内核清单和查询能力，提供经过覆盖检查的状态。
 - `Astrometry` 组合时间、参考系、历表、观测者、引力体和大气策略，提供位置阶段转换与完整观测工作流。
@@ -170,11 +184,12 @@ CatalogPlace<F>
 调用者学习高层任务接口即可完成标准路径：
 
 ```rust
-/// 使用显式时间数据把 UTC 瞬间转换到 TT
-let tt: Instant<Tt> = time.convert(utc)?;
+/// 目标尺度类型通过显式模型转换同一物理瞬间
+let tt = Instant::<Tt>::from_instant(utc, &time)?;
+let ut1 = JulianDate::<Ut1>::from_instant(utc, &time_with_eop)?;
 
-/// 在同一上下文中计算指定站点的观测位置
-let observed = astrometry.observe(&catalog_place, tt, &site)?;
+/// 同一 EOP 上下文生成保留历元尺度的框架状态
+let tirs: State<Tirs, Utc> = Frames::new(&time_with_eop).transform(cirs)?;
 
 /// 在闭区间内搜索完整的升落事件集合
 let events = events.rise_set(&target, interval, &site)?;
@@ -238,9 +253,9 @@ hyastro 不提供根级万能 `hyastro::Error`。每个深模块拥有一个 `#[
 1. `Declination::try_deg(91.0)` 返回带度单位范围的 `math::Error::OutOfRange`。
 2. 从零向量构造 `Direction<Gcrs>` 返回 `DegenerateGeometry::ZeroNorm`。
 3. 对跖方向的角距离成功返回 `π`；重合方向的位置角返回明确的未定义几何错误。
-4. `State<Gcrs, EarthCenter, Tt>` 无法传给要求 `State<Itrs, EarthCenter, Ut1>` 的接口，编译失败。
+4. `State<Gcrs, Tt>` 无法传给要求 `State<Itrs, Tt>` 的接口，编译失败；框架变换保留历元的表示尺度，变换对象与状态的物理历元不同时返回 `frame::Error::EpochMismatch`。
 5. 动态 SPICE 帧定义与请求静态帧不一致时返回 `frame::Error::FrameMismatch`。
-6. UTC 到 UT1 转换缺少 EOP 时返回 `time::Error::MissingData`；覆盖外查询返回独立的 `Coverage` 变体。
+6. `Instant::<Ut1>::from_instant(utc, &TimeContext<NoEarthOrientation>)` 因缺少 `TimeScaleModel<Ut1>` 而编译失败；EOP 覆盖外和过期查询分别返回 `EarthOrientationUnavailable` 与 `EarthOrientationExpired`。
 7. 历表存在目标但不支持段类型时返回 `UnsupportedSegment`；目标不存在时返回 `UnknownTarget`。
 8. 折射输入超出所选模型的适用高度时返回 `media::Error::OutOfDomain`。
 9. 升落搜索遇到拱极目标时返回成功分类；求值预算耗尽时返回 `event::Error::BudgetExceeded`。

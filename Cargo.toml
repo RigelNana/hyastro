@@ -8,11 +8,16 @@ license = "MIT"
 
 [features]
 default = ["std"]
-std = ["dep:garde"]
+std = ["dep:garde", "dep:sofars", "jiff?/std", "hifitime?/std"]
+jiff = ["dep:jiff"]
+hifitime = ["dep:hifitime"]
 
 [dependencies]
 garde = { version = "0.22", default-features = false, features = ["derive"], optional = true }
+hifitime = { version = "4.3", default-features = false, optional = true }
+jiff = { version = "0.2.35", default-features = false, optional = true }
 libm = "0.2"
+sofars = { version = "=0.6.1", optional = true }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]

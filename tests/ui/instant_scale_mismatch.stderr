@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/ui/instant_scale_mismatch.rs:4:32
+  |
+4 |     let _ = tai.duration_since(tt);
+  |                 -------------- ^^ expected `Instant<Tai>`, found `Instant<Tt>`
+  |                 |
+  |                 arguments to this method are incorrect
+  |
+  = note: expected struct `hyastro::time::Instant<Tai>`
+             found struct `hyastro::time::Instant<Tt>`
+note: method defined here
+ --> src/time/instant.rs
+  |
+  |     pub fn duration_since(self, earlier: Self) -> Result<Duration, Error> {
+  |            ^^^^^^^^^^^^^^

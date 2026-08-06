@@ -264,18 +264,6 @@
 - **F-SYS-009 P1 内核** 固定 UTC offset。
 - **F-SYS-010 P1 工作流** 本地时间重复/跳过的策略化解析。
 
-### 7.5 地球旋转角与恒星时
-
-- **F-SID-001 P0 内核** Earth Rotation Angle。
-- **F-SID-002 P0 内核** IAU 2006 GMST。
-- **F-SID-003 P0 内核** GAST。
-- **F-SID-004 P0 内核** equation of equinoxes。
-- **F-SID-005 P0 内核** equation of origins。
-- **F-SID-006 P0 内核** 地方平恒星时。
-- **F-SID-007 P0 内核** 地方视恒星时。
-- **F-SID-008 P1 内核** ERA/恒星时角速度。
-- **F-SID-009 P1 工作流** 指定恒星时反求近似 UT1，为事件求根提供初值。
-- **F-SID-010 P0 内核** TT 和 UT1 参数在类型上分开。
 
 ## 8. 岁差、章动与地球定向
 
@@ -307,7 +295,20 @@
 - **F-CIP-008 P0 内核** 两条链的等价校验。
 - **F-CIP-009 P2 数据** 自由核章动修正适配。
 
-### 8.3 极移与完整地球链
+### 8.3 地球旋转角与恒星时
+
+- **F-SID-001 P0 内核** Earth Rotation Angle。
+- **F-SID-002 P0 内核** IAU 2006 GMST。
+- **F-SID-003 P0 内核** GAST。
+- **F-SID-004 P0 内核** equation of equinoxes。
+- **F-SID-005 P0 内核** equation of origins。
+- **F-SID-006 P0 内核** 地方平恒星时。
+- **F-SID-007 P0 内核** 地方视恒星时。
+- **F-SID-008 P1 内核** ERA/恒星时角速度。
+- **F-SID-009 P1 工作流** 指定恒星时反求近似 UT1，为事件求根提供初值。
+- **F-SID-010 P0 内核** TT 和 UT1 参数在类型上分开。
+
+### 8.4 极移与完整地球链
 
 - **F-PM-001 P0 内核** `xp`、`yp` 极移矩阵。
 - **F-PM-002 P0 内核** 应用 TIO locator `s′`。

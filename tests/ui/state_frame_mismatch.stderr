@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/state_frame_mismatch.rs:24:18
+   |
+24 |     accepts_itrs(gcrs);
+   |     ------------ ^^^^ expected `State<Itrs, Tai>`, found `State<Gcrs, Tai>`
+   |     |
+   |     arguments to this function are incorrect
+   |
+   = note: expected struct `State<hyastro::frame::Itrs, Tai>`
+              found struct `State<hyastro::frame::Gcrs, Tai>`
+note: function defined here
+  --> tests/ui/state_frame_mismatch.rs:7:4
+   |
+ 7 | fn accepts_itrs(_: State<Itrs, Tai>) {}
+   |    ^^^^^^^^^^^^ -------------------

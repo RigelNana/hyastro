@@ -2,7 +2,7 @@ use core::{fmt, marker::PhantomData};
 
 use libm::{atan2, sqrt};
 
-use super::{Angle, Coordinate, Dimensionless, Error, Length, Speed};
+use super::{Angle, Coordinate, Dimensionless, Error, Length};
 
 /// A three-dimensional vector whose frame and scalar quantity are type checked.
 pub struct Vector3<F, Q: Coordinate> {
@@ -258,99 +258,63 @@ impl<F> fmt::Debug for Direction<F> {
     }
 }
 
-/// A Cartesian point whose frame and origin are encoded in its type.
-pub struct Point3<F, O> {
+/// A Cartesian point whose complete coordinate frame is encoded in its type.
+pub struct Point3<F> {
     coordinates: Vector3<F, Length>,
-    origin: PhantomData<O>,
 }
 
-impl<F, O> Point3<F, O> {
+impl<F> Point3<F> {
     /// Constructs a point from Cartesian coordinates.
     pub const fn new(x: Length, y: Length, z: Length) -> Self {
         Self {
             coordinates: Vector3::new(x, y, z),
-            origin: PhantomData,
         }
     }
 
-    /// Returns the position vector relative to the typed origin.
+    /// Constructs a point from its position vector in the same frame.
+    pub const fn from_position(position: Vector3<F, Length>) -> Self {
+        Self {
+            coordinates: position,
+        }
+    }
+
+    /// Returns the position vector relative to the frame's fixed origin.
     pub const fn position(self) -> Vector3<F, Length> {
         self.coordinates
     }
 
     /// Translates the point by a displacement in the same frame.
     pub fn checked_translate(self, displacement: Vector3<F, Length>) -> Result<Self, Error> {
-        let translated = self.coordinates.checked_add(displacement)?;
-        Ok(Self {
-            coordinates: translated,
-            origin: PhantomData,
-        })
+        self.coordinates
+            .checked_add(displacement)
+            .map(Self::from_position)
     }
 
-    /// Returns the displacement from another point with the same origin.
+    /// Returns the displacement from another point in the same frame.
     pub fn displacement_from(self, other: Self) -> Result<Vector3<F, Length>, Error> {
         self.coordinates.checked_sub(other.coordinates)
     }
 }
 
-impl<F, O> Copy for Point3<F, O> {}
+impl<F> Copy for Point3<F> {}
 
-impl<F, O> Clone for Point3<F, O> {
+impl<F> Clone for Point3<F> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<F, O> PartialEq for Point3<F, O> {
+impl<F> PartialEq for Point3<F> {
     fn eq(&self, other: &Self) -> bool {
         self.coordinates == other.coordinates
     }
 }
 
-impl<F, O> fmt::Debug for Point3<F, O> {
+impl<F> fmt::Debug for Point3<F> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_tuple("Point3")
             .field(&self.coordinates)
             .finish()
-    }
-}
-
-/// A position and velocity in one frame, origin, and epoch type.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct State<F, O, E> {
-    position: Point3<F, O>,
-    velocity: Vector3<F, Speed>,
-    epoch: E,
-}
-
-impl<F, O, E> State<F, O, E> {
-    /// Constructs a state from position, velocity, and epoch.
-    pub const fn new(position: Point3<F, O>, velocity: Vector3<F, Speed>, epoch: E) -> Self {
-        Self {
-            position,
-            velocity,
-            epoch,
-        }
-    }
-
-    /// Returns the state position.
-    pub const fn position(&self) -> &Point3<F, O> {
-        &self.position
-    }
-
-    /// Returns the state velocity.
-    pub const fn velocity(&self) -> &Vector3<F, Speed> {
-        &self.velocity
-    }
-
-    /// Returns the state epoch.
-    pub const fn epoch(&self) -> &E {
-        &self.epoch
-    }
-
-    /// Decomposes the state into position, velocity, and epoch.
-    pub fn into_parts(self) -> (Point3<F, O>, Vector3<F, Speed>, E) {
-        (self.position, self.velocity, self.epoch)
     }
 }

@@ -118,34 +118,34 @@ println!("{:.6} deg", sep.deg());
 - 使用 `Time<S>` 或等价标记类型编码时间尺度，其中 `S` 是封闭的尺度标记。
 - `Date`、`DateTime<S>`、`Time<S>`、`Duration`、`Epoch<S>`、`Julian<S>` 分开。
 - 两段式时间内部保持两个分量；不在方法入口或出口无条件相加。
-- 不提供缺少数据上下文的万能 `.to::<S>()`。尺度转换由 `TimeContext` 完成。
+- 不提供缺少数据上下文的万能 `.to::<S>()`。目标类型通过 `Instant::<S>::from_instant` 或 `JulianDate::<S>::from_instant` 请求转换，模型 trait 决定能力是否存在。
 - `UTC` 不是均匀连续秒标尺；时长运算需先明确是在物理时间线还是民用标签上。
 
 示例接口形态：
 
 ```rust
-let utc = Utc::parse("2016-12-31T23:59:60Z", &leaps)?;
-let tt = time.convert::<Tt>(utc)?;
-let ut1 = time.convert::<Ut1>(utc)?;
-let era = earth.era(ut1);
+let tt = Instant::<Tt>::from_instant(utc, &time)?;
+let ut1 = JulianDate::<Ut1>::from_instant(utc, &time_with_eop)?;
+let cirs_to_tirs = Frames::new(&time_with_eop).at::<Cirs, Tirs, Utc>(utc)?;
 ```
 
 ### 4.3 参考系、原点和状态
 
-- `Vector<F, U>` 表示在参考系 `F` 中、单位维度为 `U` 的自由向量。
-- `Point<F, O, U>` 表示参考系 `F`、原点 `O` 下的位置。
-- `State<F, O>` 绑定同一历元的位置和速度。
-- `Rotation<A, B>` 明确从 `A` 到 `B`；`Transform<A, B>` 可包含平移和时间导数。
-- 静态常见参考系使用标记类型；运行时 SPICE 帧使用经注册表验证的动态标识。
+- `Vector<F, U>` 表示在完整计算坐标框架 `F` 中、单位维度为 `U` 的自由向量。
+- `Point3<F>` 表示计算坐标框架 `F` 下的长度位置；`F` 已绑定参考系统或参考架实现、原点、轴和手性。
+- `State<F, S>` 绑定同一计算坐标框架和 `Instant<S>` 历元；框架变换保留 `S`，不得把算法所需的 TT/UT1 输入误作结果历元尺度。
+- `Rotation<A, B>` 只改变自由向量和方向的坐标分量；`FrameRotation<A, B, S>` 额外绑定有效历元；`StateTransform<A, B, S>` 还包含平移、时间导数和有效历元。
+- 状态变换固定使用 `r_B = R_AB r_A + t_B` 与 `v_B = R_AB v_A + ω_B × (R_AB r_A) + ṫ_B`。`t_B` 是 A 原点相对 B 原点的位置；`ω_B` 满足 `Ṙ_AB R_ABᵀ = [ω_B]×`。
+- 静态常见参考系统使用密封标记类型；运行时 SPICE 帧使用经注册表验证的动态标识。
 - 动态类型转换为静态类型必须做身份校验并返回 `Result`。
-- 不给不同原点、不同历元或不同参考系实现看似自然但物理错误的运算符。
+- 不给不同坐标框架或不同历元实现看似自然但物理错误的运算符。
 
 示例接口形态：
 
 ```rust
-let cirs: State<Cirs, Earth> = frames.transform(gcrs, at, &eop)?;
-let itrs: State<Itrs, Earth> = frames.transform(cirs, at, &eop)?;
-let local = site.observe(itrs, at)?;
+let frames = Frames::new(&time_with_eop);
+let tirs: State<Tirs, Utc> = frames.transform(cirs)?;
+let local = site.observe(tirs)?;
 ```
 
 ### 4.4 矩阵和四元数

@@ -3,7 +3,7 @@
 - 文档状态：依赖基线定稿（调研版）
 - 调研基线：2026-08-05；crates.io 元数据查询日期同为 2026-08-05
 - 配套文档：`docs/PRD.md`、`docs/FEATURES.md`、`docs/CODE_STANDARDS.md`、`docs/LIBRARY_RESEARCH.md`
-- 本文件是本次新增的依赖决策交付；配套文档已同步 ANISE 与依赖选型结论，未修改 `Cargo.toml` 或 `ref/` 仓库，未运行构建、测试、lint 或格式化
+- 实现进展：`Cargo.toml` 已锁定 `sofars = 0.6.1`，由默认 `std` feature 启用，用于 CIRS→TIRS 的 ERA 状态变换；`hifitime` 保持可选模型 adapter。其余条目仍是依赖决策基线，不代表均已接入。
 
 ## 0. 方法与约定
 
@@ -289,15 +289,15 @@ ANISE 0.10.4 满足"生产级 SPICE/DAF/SPK/PCK/参考系后端"定位：纯 Rus
 
 #### 3.2.4 hifitime —— **确定采用**（P0）
 
-- 用途：hyastro 时间内核：`Epoch`/`Duration`/`TimeScale`（13 时标）/闰秒表/历法/JD/MJD/两段式时间/格式化（ISO8601/RFC3339）。内部为 i16 世纪 + u64 纳秒整数表示（`ref/hifitime/README.md:274-277`，"nanosecond precision for 65,536 centuries"）。
-- 版本约束：`hifitime = { version = "4.3", default-features = false }`。hyastro 默认 `std` feature 再启用 `hifitime/std`；`--no-default-features` 保留其 `no_std` 时间表示。crates.io 最新 4.3.0（2026-08-05 查询）；本地仓库 HEAD 已升 4.3.1（`ref/hifitime/Cargo.toml:3`，2026-08-02 提交）。约束 `"4.3"` 允许 4.3.x 内跟进，ANISE workspace 的 `"4.3.0"` 与之兼容。
-- features：hyastro 的默认 `std` feature 启用 hifitime `std`；**不开** `ut1`（ureq 联网下载 EOP）、`lts`（联网比对 IANA 闰秒）、`python`。P0 默认构建启用 `std`，`no_std` 子集不启用。
+- 用途：可选 `hifitime` adapter，为 hyastro 强类型时间值提供 TAI/TT/TDB/TCG/TCB/GPS 数值转换、上游 `Epoch` 互操作和交叉验证。UTC 标签解析由 hyastro 的版本化 `LeapSeconds` 决定，不把 Hifitime 的内嵌表作为公开语义。
+- 版本约束：`hifitime = { version = "4.3", default-features = false, optional = true }`。约束 `"4.3"` 允许 4.3.x 内跟进，ANISE workspace 的 `"4.3.0"` 与之兼容；关闭 `hifitime` feature 时，hyastro 的历法、时长、时刻、JD/MJD 和 `LeapSeconds` 仍可独立构建。
+- features：hyastro 的 `hifitime` feature 显式启用依赖；`std` 只在依赖已启用时传播 `hifitime/std`。**不开** `ut1`（ureq 联网下载 EOP）、`lts`（联网比对 IANA 闰秒）、`python`；核心 `LeapSeconds` 不依赖这些 feature。
 - no_std：支持（`#![cfg_attr(not(feature = "std"), no_std)]`，`ref/hifitime/src/lib.rs:3`）；hyastro 的 `no_std` 内核（F-PLAT-003）可关 std 使用时间表示子集。
 - unsafe/FFI：0 处 unsafe；Kani 形式化验证工作流（`.github/workflows/formal_verification.yml`）。
 - 许可：MPL-2.0（`ref/hifitime/LICENSE.txt`）。MSRV：manifest 无 `rust-version`；CI 以 1.85 为 MSRV；std 路径经 snafu `rust_1_81` 实需 1.81+。平台：全平台（含 wasm，`web-time` 提供时钟）。
-- 为何不自己实现：闰秒表/历法/时标转换正确性极难自证（hifitime 有 Kani 验证 + 141 项测试 + 与 SPICE 的 ET/UTC 零差声明，`ref/hifitime/README.md:249`）。
-- 替代项：`chrono`（无 TAI/TT/TDB/UTC 闰秒语义、浮点偏差）、`time`（民用）、`jiff`（民用 + tz，无天文时标）、`julian`（过窄）。理由：hifitime 是唯一覆盖 13 时标 + 闰秒 + 两段式精度的活跃纯 Rust 库，且与 sofars/ANISE 同生态（交叉验证先例：hifitime 以 sofars 0.6.1 校验 TDB/TCG，`ref/hifitime/Cargo.toml` dev-deps）。
-- 注意：与 SOFA `dat` 的闰秒语义差异（1972 年前 10 秒跳变 vs SOFA 非整数偏移，`ref/hifitime/README.md:296`）——hyastro 以 hifitime 语义为规范，sofars::ts 仅作对照（见 3.2.5）。
+- 为何保留：相对论时间尺度转换正确性极难自证；Hifitime 有 Kani 验证、完整测试以及与 SPICE 的 ET/UTC 对照，可作为算法 adapter 和独立校验源。闰秒版本、覆盖和过期属于 hyastro 领域不变量，因此由 hyastro 自己保存。
+- 替代项：`chrono`（无 TAI/TT/TDB/UTC 闰秒语义）、`time`（民用）、`jiff`（民用 + tz，无天文时标）、`julian`（过窄）。Hifitime 仍是覆盖多种天文时标的活跃纯 Rust 候选，但不再拥有 hyastro 的 UTC 数据策略。
+- 注意：Hifitime、SOFA `dat` 和 IANA 表对 1972 年前 UTC 的语义不同。hyastro 当前 `LeapSeconds::builtin` 明确从 1972-01-01 开始，超出覆盖返回错误；1960–1971 分段漂移以后作为独立 UTC 历史模型实现，不伪装成 `LeapSecond`。
 
 #### 3.2.5 sofars —— **确定采用**（P0）
 

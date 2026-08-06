@@ -84,6 +84,14 @@
 
 **算法域覆盖**：[观察] 对照 SOFA C 2023-10-11（`ref/rsofa/extern/sofa.h` 中 247 个 `iau*` 原型），sofars 实现了 230/247（按规范化函数名对比）。缺 17 个，全部集中在 `vm` 与 `ts` 工具域：`cpv`（拷贝 pv 向量）、`p2pv`、`p2s`、`pap`、`pas`、`pv2p`、`pvdpv`、`pvm`（pv 模长）、`pvup`、`pvxpv`、`rm2v`（旋转矩阵到旋转向量）、`s2p`、`s2xpv`、`sxpv`、`zpv`、`zr`、`tf2d`（时分秒到日小数）。已抽查确认这些名字在 `ref/sofars/src` 中无同名实现。其余 230 个覆盖：时间尺度（`ts` 21 个函数，含 `dat` 闰秒、`dtdb`、`dtf2d`、`d2dtf`、UTC/TAI/TT/TDB/TCG/TCB/UT1 全对转换）、地球定向（`erst`：`era00`/`gmst00`/`gmst06`/`gmst82`/`gst00a`/`gst00b`/`gst06`/`gst06a`/`gst94`/`ee00`/`ee00a`/`ee00b`/`ee06a`/`eect00`/`eqeq94`）、岁差章动极移（`pnp` 64 例程：`bp00`/`bp06`/`c2i*`/`c2t*`/`num00a`/`nut00a`/`nut00b`/`nut06a`/`nut80`/`pnm00a`/`pom00`/`xy06`/`xys00a`/`xys06a` 等）、基本角（`fundargs` 14 个）、坐标转换（`coords`：`icrs2g`/`g2icrs`/`eceq06`/`eqec06`/`ecm06`/`lteceq`/`ltecm`/`lteqec`/`eform`/`gc2gd`/`gd2gc`/`ae2hd`/`hd2ae`/`hd2pa`）、星表（`star`：`fk425`/`fk45z`/`fk524`/`fk52h`/`fk54z`/`fk5hip`/`fk5hz`/`h2fk5`/`hfk5z`）、天体测量（`astro`：`atci13`/`atciq`/`atciqn`/`atco13`/`atio13`/`atoc13`/`atoi13`/`apci`/`apco`/`ab`/`ld`/`ldn`/`ldsun`/`pmpx`/`pmsafe`/`starpv`/`pvstar`/`pvtob`/`refco` 等）、投影（`projection`：`tpors`/`tporv`/`tpsts`/`tpstv`/`tpxes`/`tpxev`）、历表（`eph`：`epv00`（地球，153 KB 系数内嵌）、`moon98`（月球）、`plan94`（冥王星））、历法（`cal`：`cal2jd`/`jd2cal`/`jdcalf`/`epb`/`epb2jd`/`epj`/`epj2jd`）、向量矩阵（`vm` 38 个，含 `a2af`/`a2tf`/`af2a`/`tf2a` 角度格式化与全套旋转矩阵）。
 
+**时间尺度转换细节**：[观察] `sofars::ts` 对不同尺度关系保持了 SOFA 的参数边界，而不是提供一个无条件的万能转换器：
+
+- `taitt`/`tttai` 只应用精确常数 `TT−TAI = 32.184 s`（`src/ts/taitt.rs`、`src/ts/tttai.rs`）。
+- `tttcg`/`tcgtt` 使用 `L_G = 6.969290134e-10` 和 1977-01-01 参考历元实现 IAU 定义的 TT↔TCG 线性变换（`src/ts/tttcg.rs`、`src/ts/tcgtt.rs`）。
+- `tdbtcb`/`tcbtdb` 使用 `L_B = 1.550519768e-8`、`TDB0 = -6.55e-5 s` 和同一参考历元实现 IAU 2006 TDB↔TCB 线性变换（`src/ts/tdbtcb.rs`、`src/ts/tcbtdb.rs`）。
+- `tttdb`/`tdbtt` **不计算模型**，只应用调用者提供的 `dtr = TDB−TT` 秒数。`dtdb(date1, date2, ut, elong, u, v)` 才提供 Fairhead–Bretagnon 完整地心级数加 Moyer/Murray 站心近似；它需要 TDB/TT 日期、UT1 日小数、经度及观测者相对地轴/赤道面的距离。上游文档给出的 1950–2050 绝对精度为相对 DE405 数值积分优于约 ±3 ns；最终高精度关系仍应由太阳系历表数值积分决定（`src/ts/dtdb.rs`）。
+- UTC↔TAI/UT1 路径调用 `ts::dat` 的 SOFA 内嵌 UTC 历史。该数据策略与 hyastro 的版本化 `LeapSeconds` 不同，因此只适合作为对照，不得接管 hyastro 的 UTC 标签语义。
+
 **数据依赖**：[观察] 无运行时数据文件；所有级数系数与闰秒表（`ts/dat.rs`）内嵌在源码中。历表只覆盖地球（epv00）、月球（moon98）、冥王星（plan94）——与 SOFA C 一致，不提供其余行星位置。
 
 **精度依据**：[观察] README 声称 "Strictly follows IAU 2000/2006 models, ensuring numerical consistency with the original SOFA C library"（`ref/sofars/README.md:15`）。测试以 SOFA 官方验证程序 `t_sofa_c.c` 的容差体系复刻：`tests/common/mod.rs` 实现 `vvd`（double 值容差校验）与 `viv`（整型校验），每个测试用例的期望值直接取自 SOFA C 官方值（例：`ref/sofars/tests/astro_test.rs` 中 `vvd(res[0], 1.234087484501017061, 1e-12, "pmsafe", "ra2")`）。
@@ -177,6 +185,7 @@
 - 只解决时间；无任何天文几何（角度、向量、矩阵、坐标、地球定向、历表）。
 - UTC 语义与 SOFA 有意不同：[观察] "Hifitime only accounts for leap seconds announced by IERS in its computations: there is a ten (10) second jump between TAI and UTC on 01 January 1972"（`ref/hifitime/README.md:296`），即 1972 年前与 SOFA `dat` 的语义不一致（SOFA 返回 1960-1972 非整数偏移）；与 sofars::ts 混用时必须注意边界语义差异。
 - TDB 为 SPICE/ESA 简化模型（非完整 IAU 相对论积分），对需要完整 TCB-TDB 建模的场景精度不足（README 注明约 3e-5 秒）。
+- TCG/TCB 历法标签存在 32 秒参考历元偏差：[观察] Hifitime 4.3.0 的 `TimeScale::gregorian_epoch_offset` 从 1977 参考历元中减去整秒分量，再由 `Epoch::to_gregorian` 重建标签，导致 TCG/TCB 标签相对 SOFA 两段式 JD 少 32 秒；其上游 `sofars` 对照测试只比较物理 `Epoch` 差值，没有覆盖 Gregorian/JD 标签。hyastro 适配器因此从 Hifitime 的尺度内 `Duration` 与标准参考 JD 重建 TCG/TCB 标签，并以 `sofars::ts::{tttcg,tdbtcb}` 锁定回归。
 
 **接入风险**：作为时间内核是最佳候选（无 unsafe、no_std、形式化验证、MPL-2.0、活跃维护）；但需在适配层统一"闰秒语义"（IERS-only vs SOFA dat），并避免同时让产品代码直接依赖 `sofars::ts` 与 `hifitime` 两套时间 API。
 
@@ -405,12 +414,30 @@ flowchart LR
 
 ### 7.5 需要新增的后端（产品侧，非七库所能提供）
 
-1. **EOP 数据后端**：IERS 快速服务/Bulletin A 的 xp、yp、UT1-UTC 获取与内插（sofars/novas 接口均需调用方传入；hifitime ut1 仅有 UT1 通道，且其 EOP 文件格式为 JPL EOP2）。
+1. **EOP 数据后端**：IERS EOP 20u24 C04 与 `finals.all (IAU2000)` 的 `xp`、`yp`、`UT1−UTC`、LOD、`dX`、`dY` 获取、解析、质量标记与内插（sofars/novas 接口均需调用方传入；hifitime 的 JPL EOP2 适配器只有 UT1 通道）。
 2. **历表与动态参考系后端**：采用 ANISE 0.10.4 读取 JPL DE 的 BSP/SPK、BPC 并执行目标-中心状态和参考系变换；产品层负责固定内核版本、校验和、覆盖和离线加载。ANISE 未支持的 SPK 类型及 CK/SCLK/DSK/IK/EK 由独立可选适配器补充。
 3. **星表后端**：Gaia/Hipparcos/FK5 星表加载与列映射（七库均无文件读取；novas 仅内存 `make_cat_entry`）。
 4. **气象参数后端**：折射输入（气压/温度/湿度/波长），供 sofars `refco`/`atio13` 使用。
 5. **事件计算模块**：升落/中天/月相/二分点（移植 rust-astro `transit.rs`/`lunar.rs` 相关算法，MIT 许可）。
 6. **四元数与姿态类型层**：旋转矩阵 ↔ 四元数互转与姿态传播原语（sofars 无四元数；nalgebra 可作底层）。
+
+### 7.6 EOP 数据源与现有 Rust 解析器补充调研（2026-08-06）
+
+**数据不是由 IAU 岁差章动公式生成。** EOP 是 IERS 根据 VLBI、GNSS、SLR 等观测发布的外部时序数据；IAU 2006/2000A 模型提供理论岁差章动，EOP 中的 `dX/dY` 是对该模型的观测修正。生产输入应区分：
+
+- **EOP 20u24 C04**：IERS 长期最终序列，当前 0h UTC 单文件从 1962 年起，文件头直接给出 `x/y`、`UT1−UTC`、`dX/dY`、`xrt/yrt`、LOD 及误差列；适合历史最终值与基准测试。官方入口：[IERS Earth orientation data](https://datacenter.iers.org/eop.php)，当前文件：[EOP 20u24 C04 0h UTC](https://datacenter.iers.org/data/latestVersion/EOP_20u24_C04_one_file_1962-now.txt)。
+- **`finals.all (IAU2000)` / Bulletin A**：快速值与预测。固定宽度格式分别为极移、`UT1−UTC`、LOD、`dX/dY` 提供 `I`（IERS）或 `P`（prediction）标志；LOD 明确允许空列，后续预测区的其他列也可能为空。格式定义：[USNO `readme.finals2000A`](https://maia.usno.navy.mil/ser7/readme.finals2000A)，IERS 下载入口：[IERS EOP products](https://datacenter.iers.org/eop.php)。
+
+现有 Rust 候选的边界：
+
+| crate | 已确认能力 | 不直接采用的原因 |
+|---|---|---|
+| `hifitime 4.3.x` | `Ut1Provider` 解析 JPL EOP2，并提供 UT1 转换 | 解析器只读取 MJD 与 `UT1−TAI`；没有 `xp/yp`、LOD、`dX/dY`，不能作为完整 EOP 后端（`ref/hifitime/src/epoch/ut1.rs`） |
+| [`deep-time 0.1.0-beta.33`](https://docs.rs/deep-time/0.1.0-beta.33/deep_time/eop/) | 解析 `Finals2000A`、C04 和自定义列，线性内插 `UT1−UTC/xp/yp` | 不保留 LOD、`dX/dY`、误差或观测/预测标志；同时引入第二套完整时间类型系统 |
+| [`celestial-eop-data 0.1.12`](https://docs.rs/celestial-eop-data/0.1.12/celestial_eop_data/) | 捆绑 C04 与 finals2000A，记录含 MJD、`xp/yp`、`UT1−UTC`、LOD、`dX/dY` | 其构建期 finals 解析器把缺失 LOD、`dX/dY` 写成 `0.0`，不可再区分“缺失”和“真实零”；运行时依赖 `std`、`zstd`、`OnceLock` 与分配；滚动数据还需额外版本/校验和策略 |
+| [`tempoch-core 0.6.5`](https://docs.rs/tempoch-core/0.6.5/tempoch_core/earth/eop/) | 完整字段，缺失值保留为 `Option`，运行时数据包 | `AGPL-3.0-only`，且引入其整套时间、数量和归档栈，不适合作为 hyastro 的小型解析依赖 |
+
+**建议**：不为文本解析引入另一套时间系统。先在 `std` feature 下实现两个窄适配器（C04 与 finals2000A 固定宽度），输出 hyastro 自身的领域类型；核心 `EarthOrientationTable<'a>` 继续只借用已验证样本并保持 `no_std`。解析层必须保留数据来源版本、覆盖区间、I/P 质量标记、空列和误差，不能把缺失值写成零。当前 `EarthOrientationSample` 把六个数值都设为必填，因此在接入预测数据前必须二选一：只接受字段完整的行，或先把缺失/质量状态显式建模；后者更适合 Bulletin A。
 
 ## 8. 结论
 
