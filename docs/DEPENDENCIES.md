@@ -3,7 +3,7 @@
 - 文档状态：依赖基线定稿（调研版）
 - 调研基线：2026-08-05；crates.io 元数据查询日期同为 2026-08-05
 - 配套文档：`docs/PRD.md`、`docs/FEATURES.md`、`docs/CODE_STANDARDS.md`、`docs/LIBRARY_RESEARCH.md`
-- 实现进展：`Cargo.toml` 已锁定 `sofars = 0.6.1`，由默认 `std` feature 启用，用于 CIRS→TIRS 的 ERA 状态变换；`hifitime` 保持可选模型 adapter。其余条目仍是依赖决策基线，不代表均已接入。
+- 实现进展：`Cargo.toml` 已锁定 `sofars = 0.6.1`，由默认 `std` feature 启用，用于 IAU 2006/2000A `GCRS → CIRS → TIRS → ITRS` 地球定向链；`hifitime` 保持可选模型 adapter。库内已实现 IERS EOP 20u24 C04 与 finals2000A 解析器，但不引入额外 EOP crate。其余条目仍是依赖决策基线，不代表均已接入。
 
 ## 0. 方法与约定
 
@@ -82,7 +82,7 @@
 | bzip2 | **明确不采用** | FFI + 低频用途 |
 | fitsio | **明确不采用** | 生产基线不引入 cfitsio FFI；完整 FITS 写入需求须另立决策 |
 | celestial（gaker） | **明确不采用** | 第二套领域模型（时间/帧/坐标），与 hyastro 强类型冲突 |
-| celestial-eop-data | **明确不采用** | 数据模型无观测/预报标志与不确定度；hyastro 自有 `EopProvider` |
+| celestial-eop-data | **明确不采用** | 数据模型无观测/预报标志与不确定度；hyastro 使用 `EarthOrientationRecord` / `EarthOrientationData` 保留完整 IERS 语义 |
 | uom 之外的其它单位 crate（dimensional 等） | **明确不采用** | 同 uom 理由 |
 | polars | **明确不采用（生产）** | 仅 ANISE dev-deps 使用；hyastro 用 arrow/parquet 直接接口 |
 
@@ -660,7 +660,7 @@ flowchart LR
 3. **数据下载策略**（核心离线，PRD 4.2）：
    - hyastro 数据工具（独立命令/脚本，非库行为）下载 SPK/PCK/EOP/星表：**必须 HTTPS**（规避 ANISE metaload 的 http:// 端点风险，见 2.9）、固定 URL + CRC32/sha256 校验、记录数据版本/日期/来源；
    - 版本快照化：`de440s.bsp`、`pck11.pca`、`moon_fk_de440.epa`、`moon_pa_de440_200625.bpc`（ANISE Default 集，CRC32 已给出）、`earth_latest_high_prec.bpc` 改为**日期戳固定版**（不追每日更新）；
-   - EOP：IERS `finals2000A.all`（或 C04）按公告周期快照，观测/预报标志与不确定度保留（自有 `EopProvider` 数据模型）；
+   - EOP：仓库固定 `2026-08-06` 的 IERS EOP 20u24 C04 与 finals2000A 原始快照，URL、SHA-256、记录数和有效列边界记录于 `data/eop/SOURCES.toml`；`IersC04` / `IersFinals2000A` 解析器保留观测/预报标志、不确定度和空列，调用者显式选择转换为完整样本的区间；
    - 构建期：**禁止**任何 build.rs 联网（anise 的 `embed_ephem` 特征模式不采用）。
 4. **依赖审计门禁**：cargo-audit（漏洞）+ cargo-deny（许可/bans）+ cargo-semver-checks（升级破坏检测）+ cargo-msrv（MSRV 回归）四件套进 CI；参考源码 commit（ref/）只用于调研与差分，不成为构建输入（CODE_STANDARDS 15 节）。
 

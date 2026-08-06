@@ -143,6 +143,37 @@ pub enum Error {
         /// Violated sample invariant.
         reason: &'static str,
     },
+    /// An IERS Earth-orientation text record could not be parsed.
+    #[cfg(feature = "std")]
+    #[error("invalid Earth-orientation {field} on source line {line}")]
+    InvalidEarthOrientationText {
+        /// One-based source line.
+        line: usize,
+        /// Field or structural element that failed validation.
+        field: &'static str,
+    },
+    /// A record's calendar label and supplied Modified Julian Date disagreed.
+    #[cfg(feature = "std")]
+    #[error(
+        "Earth-orientation source line {line} has MJD {actual}, expected {expected} from its UTC calendar label"
+    )]
+    EarthOrientationMjdMismatch {
+        /// One-based source line.
+        line: usize,
+        /// MJD derived from the parsed UTC calendar label.
+        expected: f64,
+        /// MJD carried by the source record.
+        actual: f64,
+    },
+    /// A normalized record lacked a value required by a complete EOP sample.
+    #[cfg(feature = "std")]
+    #[error("Earth-orientation record at {epoch_tai_nanoseconds} TAI ns lacks required {field}")]
+    MissingEarthOrientationValue {
+        /// Missing semantic field.
+        field: &'static str,
+        /// Record epoch as TAI nanoseconds since 1900-01-01 TAI.
+        epoch_tai_nanoseconds: i128,
+    },
     /// Earth-orientation samples do not cover a requested physical instant.
     #[error(
         "Earth-orientation data covers [{coverage_start}, {coverage_end}] TAI ns, not requested instant {requested} TAI ns"

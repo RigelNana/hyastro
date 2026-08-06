@@ -2,9 +2,9 @@ error[E0308]: mismatched types
  --> tests/ui/frame_time_scale_mismatch.rs:7:30
   |
 7 |     let _: State<Tirs, Tt> = frames.transform(state).unwrap();
-  |            ---------------   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `State<Tirs, Tt>`, found `State<Tirs, Tai>`
+  |            ---------------   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `State<Tirs, Tt>`, found `State<_, Tai>`
   |            |
   |            expected due to this
   |
   = note: expected struct `State<hyastro::frame::Tirs, Tt>`
-             found struct `State<hyastro::frame::Tirs, Tai>`
+             found struct `State<_, Tai>`

@@ -8,6 +8,8 @@ mod eop;
 mod error;
 #[cfg(feature = "hifitime")]
 mod hifitime;
+#[cfg(feature = "std")]
+mod iers;
 mod instant;
 #[cfg(feature = "jiff")]
 mod jiff;
@@ -26,6 +28,11 @@ pub use eop::{
 pub use error::Error;
 #[cfg(feature = "hifitime")]
 pub use hifitime::{Hifitime, HifitimeScale};
+#[cfg(feature = "std")]
+pub use iers::{
+    EarthOrientationData, EarthOrientationProduct, EarthOrientationQuality, EarthOrientationRecord,
+    EarthOrientationUncertainty, EarthOrientationValueKind, IersC04, IersFinals2000A,
+};
 pub use instant::{Epoch, Instant, UnixTimestamp};
 #[cfg(feature = "jiff")]
 pub use jiff::Jiff;

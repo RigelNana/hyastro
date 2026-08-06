@@ -412,9 +412,9 @@ flowchart LR
 - **novas**：0.1.3；上游算法冻结于 NOVAS C3.1（2011-03，`ref/novas/novasc3.1/README.txt`）。
 - **建议**：产品侧建立"算法版本台账"：SOFA 版本（2023-10-11）→ sofars/rsofa 对照基准；ERFA 子模块 SHA → erfa-sys 对照基准；NOVAS C3.1 → novas 对照基准；DE 历表版本（405/421/440 等）→ 历表后端参数。
 
-### 7.5 需要新增的后端（产品侧，非七库所能提供）
+### 7.5 产品侧后端状态
 
-1. **EOP 数据后端**：IERS EOP 20u24 C04 与 `finals.all (IAU2000)` 的 `xp`、`yp`、`UT1−UTC`、LOD、`dX`、`dY` 获取、解析、质量标记与内插（sofars/novas 接口均需调用方传入；hifitime 的 JPL EOP2 适配器只有 UT1 通道）。
+1. **EOP 数据后端（已落地）**：`IersC04` 与 `IersFinals2000A` 解析 IERS EOP 20u24 C04 和 `finals.all (IAU2000)` 的 `xp`、`yp`、`UT1−UTC`、LOD、`dX`、`dY`、不确定度与质量标记；`EarthOrientationData` 显式筛选覆盖并转换到无分配查询表。sofars 提供后续 IAU 2006/2000A 数值内核。
 2. **历表与动态参考系后端**：采用 ANISE 0.10.4 读取 JPL DE 的 BSP/SPK、BPC 并执行目标-中心状态和参考系变换；产品层负责固定内核版本、校验和、覆盖和离线加载。ANISE 未支持的 SPK 类型及 CK/SCLK/DSK/IK/EK 由独立可选适配器补充。
 3. **星表后端**：Gaia/Hipparcos/FK5 星表加载与列映射（七库均无文件读取；novas 仅内存 `make_cat_entry`）。
 4. **气象参数后端**：折射输入（气压/温度/湿度/波长），供 sofars `refco`/`atio13` 使用。
@@ -437,12 +437,12 @@ flowchart LR
 | [`celestial-eop-data 0.1.12`](https://docs.rs/celestial-eop-data/0.1.12/celestial_eop_data/) | 捆绑 C04 与 finals2000A，记录含 MJD、`xp/yp`、`UT1−UTC`、LOD、`dX/dY` | 其构建期 finals 解析器把缺失 LOD、`dX/dY` 写成 `0.0`，不可再区分“缺失”和“真实零”；运行时依赖 `std`、`zstd`、`OnceLock` 与分配；滚动数据还需额外版本/校验和策略 |
 | [`tempoch-core 0.6.5`](https://docs.rs/tempoch-core/0.6.5/tempoch_core/earth/eop/) | 完整字段，缺失值保留为 `Option`，运行时数据包 | `AGPL-3.0-only`，且引入其整套时间、数量和归档栈，不适合作为 hyastro 的小型解析依赖 |
 
-**建议**：不为文本解析引入另一套时间系统。先在 `std` feature 下实现两个窄适配器（C04 与 finals2000A 固定宽度），输出 hyastro 自身的领域类型；核心 `EarthOrientationTable<'a>` 继续只借用已验证样本并保持 `no_std`。解析层必须保留数据来源版本、覆盖区间、I/P 质量标记、空列和误差，不能把缺失值写成零。当前 `EarthOrientationSample` 把六个数值都设为必填，因此在接入预测数据前必须二选一：只接受字段完整的行，或先把缺失/质量状态显式建模；后者更适合 Bulletin A。
+**实现结论**：已按上述边界在 `std` feature 下实现 `IersC04` 与 `IersFinals2000A` 两个窄解析器，输出 `EarthOrientationRecord` / `EarthOrientationData`；原始字段用 `Option` 保留空列，质量按极移、UT1、LOD、天极四个域保存，不把缺失值写成零。`try_samples` 对每一行执行严格完整性转换；`try_samples_in` 允许调用者先与闰秒覆盖显式求交。无分配的 `EarthOrientationTable<'a>` 仍属于 `no_std` 核心。仓库快照及 URL、SHA-256、记录数和字段覆盖边界见 `data/eop/SOURCES.toml`。
 
 ## 8. 结论
 
 1. 七库中，**hifitime（时间）与 sofars（天文算法）构成唯一"可直接进产品"的纯 Rust 内核组合**：前者无 unsafe、no_std、形式化验证、活跃维护；后者 0 unsafe、以 SOFA C 2023-10-11 官方数值为基准的 196 项测试、覆盖 230/247 函数。二者已存在 dev 层交叉验证先例（hifitime 用 sofars 校验 TDB/TCG）。
-2. **没有任何单库覆盖全部需求域**；四元数、EOP 数据源、星表 I/O、气象参数和完整天文事件仍必须新增或外引；历表文件与动态参考系已确定由 ANISE 可选适配器承担。
+2. **没有任何单库覆盖全部需求域**；四元数、星表 I/O、气象参数和完整天文事件仍必须新增或外引。EOP 数据源与 IAU 2006/2000A `GCRS → CIRS → TIRS → ITRS` 链已由 hyastro 领域类型、固定 IERS 快照和 sofars 数值内核实现；历表文件与动态参考系已确定由 ANISE 可选适配器承担。
 3. **rsofa 与 erfa-sys 不建议作为运行时核心**（C 工具链构建、系统库依赖、测试缺失/停更），但 rsofa 作为 SOFA C 逐位对照后端、erfa-sys 作为 ERFA C 生态对接点仍有适配价值；erfa 纯 Rust crate 覆盖过窄且停更，不建议引入。
 4. **novas 是独立于 SOFA 系的最佳交叉验证参考**（USNO 官方、优于 1 毫角秒声明、CI 双目标），但需先澄清其 Rust 包装层许可（MIT vs GPLv3-only 冲突，且上游"无许可要求"），并接受 0.1.x 与 `links` 独占、wasm 符号替换等工程约束。
 5. **rust-astro 是唯一的事件计算现成实现**（升落/中天/月相/二分点），但库整体陈旧（2018、edition 2015），仅作移植蓝本。

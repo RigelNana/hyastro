@@ -1,15 +1,22 @@
-error[E0277]: the trait bound `Frames<'_, '_, '_>: StateTransformModel<hyastro::frame::Gcrs, hyastro::frame::Itrs, Tai>` is not satisfied
+error[E0277]: the trait bound `Frames<'_, '_, '_>: StateTransformModel<hyastro::frame::Bcrs, hyastro::frame::Itrs, Tai>` is not satisfied
  --> tests/ui/unsupported_frame_path.rs:7:25
   |
-7 |     let _ = frames.at::<Gcrs, Itrs, Tai>(epoch);
-  |                         ^^^^ the trait `StateTransformModel<hyastro::frame::Gcrs, hyastro::frame::Itrs, Tai>` is not implemented for `Frames<'_, '_, '_>`
+7 |     let _ = frames.at::<Bcrs, Itrs, Tai>(epoch);
+  |                         ^^^^ the trait `StateTransformModel<hyastro::frame::Bcrs, hyastro::frame::Itrs, Tai>` is not implemented for `Frames<'_, '_, '_>`
   |
-help: the trait `StateTransformModel<hyastro::frame::Gcrs, hyastro::frame::Itrs, Tai>` is not implemented for `Frames<'_, '_, '_>`
-      but trait `StateTransformModel<hyastro::frame::Cirs, hyastro::frame::Tirs, Tai>` is implemented for it
- --> src/frame/frames.rs
-  |
-  | impl<S: TimeScale> StateTransformModel<Cirs, Tirs, S> for Frames<'_, '_, '_> {
-  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = help: `Frames<'_, '_, '_>` implements trait `StateTransformModel<From, To, S>`:
+            StateTransformModel<hyastro::frame::Cirs, hyastro::frame::Gcrs, S>
+            StateTransformModel<hyastro::frame::Cirs, hyastro::frame::Itrs, S>
+            StateTransformModel<hyastro::frame::Cirs, hyastro::frame::Tirs, S>
+            StateTransformModel<hyastro::frame::Gcrs, hyastro::frame::Cirs, S>
+            StateTransformModel<hyastro::frame::Gcrs, hyastro::frame::Itrs, S>
+            StateTransformModel<hyastro::frame::Gcrs, hyastro::frame::Tirs, S>
+            StateTransformModel<hyastro::frame::Itrs, hyastro::frame::Cirs, S>
+            StateTransformModel<hyastro::frame::Itrs, hyastro::frame::Gcrs, S>
+            StateTransformModel<hyastro::frame::Itrs, hyastro::frame::Tirs, S>
+            StateTransformModel<hyastro::frame::Tirs, hyastro::frame::Cirs, S>
+            StateTransformModel<hyastro::frame::Tirs, hyastro::frame::Gcrs, S>
+            StateTransformModel<hyastro::frame::Tirs, hyastro::frame::Itrs, S>
 note: required by a bound in `Frames::<'context, 'leap, 'eop>::at`
  --> src/frame/frames.rs
   |

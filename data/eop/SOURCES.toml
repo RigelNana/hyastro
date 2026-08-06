@@ -1,0 +1,22 @@
+snapshot_date = "2026-08-06"
+
+[c04]
+product = "IERS EOP 20u24 C04, IAU 2000A dX/dY, 0h UTC"
+source = "https://datacenter.iers.org/data/latestVersion/EOP_20u24_C04_one_file_1962-now.txt"
+file = "eop-20u24-c04-1962-now-2026-08-06.txt"
+sha256 = "5584711f353abf7ab6f36e5c81fb0ddb2274d94899c9f919f238b4b8d968ed4b"
+records = 23564
+mjd_start = 37665.0
+mjd_end = 61228.0
+
+[finals2000a]
+product = "IERS finals.all, IAU 2000A"
+source = "https://datacenter.iers.org/data/latestVersion/finals.all.iau2000.txt"
+format = "https://maia.usno.navy.mil/ser7/readme.finals2000A"
+file = "finals2000a-2026-08-06.all"
+sha256 = "9707981f01b21bf8ef09b47381fd615f4fad793dddaf5bf357fb0e2ea00f5861"
+rows = 19998
+mjd_start = 41684.0
+mjd_last_polar_motion_and_ut1 = 61631.0
+mjd_last_lod = 61257.0
+mjd_last_celestial_pole_offsets = 61339.0

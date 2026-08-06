@@ -140,8 +140,9 @@ v_to = R_from_to v_from + ω × (R_from_to r_from) + t_dot
 - `JulianDate<S>`、`ModifiedJulianDate<S>`：保留双分量的连续日表示。
 - `Epoch<S>`：供坐标、星表或轨道参数引用的参考瞬间。
 - `LeapSeconds<'a>`：无分配、版本化的闰秒数据，显式保存起始偏移、覆盖范围和过期日；`LeapSecond` 只表示真正的 ±1 秒事件。
-- `EarthOrientationSample`：某个 UTC 标记物理瞬间的 `UT1−UTC`、LOD、`xp`、`yp`、`dX`、`dY` 强类型观测值。
-- `EarthOrientationTable<'a>`：不可变、版本化、带覆盖和过期边界的 EOP 数据；只在首末样本闭区间内线性插值，不外推；跨闰秒先插值连续的 `UT1−TAI`。
+- `EarthOrientationRecord`：IERS 原始记录的完整领域表示；保留产品类型、UTC/MJD 历元、各分量的可选值、每域观测/预报质量标记和可选不确定度。`EarthOrientationData` 保存同一产品解析后的有序记录，并只在调用者指定的覆盖区间内严格转换成完整样本。
+- `EarthOrientationSample`：可进入计算热路径的完整 EOP 样本，包含某个 UTC 标记物理瞬间的 `UT1−UTC`、LOD、`xp`、`yp`、`dX`、`dY` 强类型值，以及可选的极移变化率。原始空列不能转换为零；缺少算法必需量时转换明确失败。
+- `EarthOrientationTable<'a>`：不可变、版本化、带覆盖和过期边界的 EOP 数据；只在首末样本闭区间内线性插值，不外推；跨闰秒先插值连续的 `UT1−TAI`。存在相邻样本时，表可由样本差分推导极移与天极偏差变化率。
 
 尺度转换由目标类型发起：`Instant::<S>::from_instant(source, &model)` 证明模型覆盖后保留精确内部 TAI 坐标，`JulianDate::<S>::from_instant(source, &model)` 计算目标尺度数值。`TimeScaleModel<S>` 是密封能力 trait；普通 `TimeContext<NoEarthOrientation>` 只实现 UTC/TAI/TT/GPS，加入 `EarthOrientationTable` 后的上下文才实现 UT1，hifitime adapter 实现其支持的模型尺度。不存在无条件公开重标或直接跨尺度 `From`。UTC 日期时间标签允许合法的 `23:59:60`；`TimeContext::new` 接受显式 `LeapSeconds`，`TimeContext::builtin` 使用 IERS Bulletin C 72 快照。
 
@@ -175,7 +176,7 @@ CatalogPlace<F>
 上下文是构造完成后不可变、可安全共享的算法输入。上下文不联网、不读取环境变量、不自动选择 latest 数据，也不依赖进程级可变状态。
 
 - `TimeContext<'a, E>` 拥有闰秒策略，并用类型参数 `E` 表达 EOP 能力；`with_earth_orientation` 只接收已验证、不可变、版本化的 `EarthOrientationTable`。
-- `Frames` 借用同一个带 EOP 的 `TimeContext`；密封 `StateTransformModel<From, To, S>` 只为已实现的静态路径提供 `at` 和 `transform`，因此缺失路径在编译期失败。目前 CIRS→TIRS 由 UT1 ERA 和 LOD 角速度构造完整状态变换。
+- `Frames` 借用同一个带 EOP 的 `TimeContext`；密封 `StateTransformModel<From, To, S>` 只为已实现的静态路径提供 `at` 和 `transform`，因此缺失路径在编译期失败。地球定向主路径是 `GCRS → CIRS → TIRS → ITRS`：IAU 2006/2000A CIP/CIO 模型加入 EOP `dX/dY`，ERA 使用 UT1，极移使用 `xp/yp` 与 TIO locator；LOD 和插值后的 EOP 变化率共同生成完整状态变换。相邻路径、逆路径及其链式组合均由同一模型提供。
 - `Earth` 拥有椭球、站点和地球定向工作流，提供地理坐标及站点状态。
 - `Ephemeris` 拥有冻结顺序的内核清单和查询能力，提供经过覆盖检查的状态。
 - `Astrometry` 组合时间、参考系、历表、观测者、引力体和大气策略，提供位置阶段转换与完整观测工作流。

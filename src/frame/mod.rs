@@ -1,5 +1,7 @@
 //! Static astronomical coordinate frames and epoch-bound state transforms.
 
+#[cfg(feature = "std")]
+mod earth_orientation;
 mod error;
 #[cfg(feature = "std")]
 mod frames;

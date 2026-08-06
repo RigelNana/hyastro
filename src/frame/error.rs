@@ -21,6 +21,24 @@ pub enum Error {
         /// State or following-transform epoch in the same representation.
         value_tai_nanoseconds: i128,
     },
+    /// EOP coverage provided a value but not the derivative required for a state transform.
+    #[error("Earth-orientation rate {field} is unavailable at {epoch_tai_nanoseconds} TAI ns")]
+    EarthOrientationRateUnavailable {
+        /// Missing derivative.
+        field: &'static str,
+        /// Transform epoch as TAI nanoseconds since 1900-01-01 TAI.
+        epoch_tai_nanoseconds: i128,
+    },
+    /// Numerical rotation differentiation did not meet its explicit error bound.
+    #[error(
+        "rotation-rate differentiation residual {residual} rad/s exceeds tolerance {tolerance} rad/s"
+    )]
+    RotationRateDidNotConverge {
+        /// Richardson error estimate in radians per second.
+        residual: f64,
+        /// Required maximum error in radians per second.
+        tolerance: f64,
+    },
 }
 
 impl Error {
