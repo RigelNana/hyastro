@@ -3,8 +3,8 @@ use hyastro::{
     frame::{Cirs, Frames, Gcrs, Itrs, State, Tirs},
     math::{Length, Point3, Speed, Vector3},
     time::{
-        DateTime, Duration, EarthOrientationProduct, EarthOrientationTable,
-        EarthOrientationValueKind, Error, Gregorian, IersC04, IersFinals2000A, JulianDate,
+        DateTime, Duration, EarthOrientationAcceptance, EarthOrientationProduct,
+        EarthOrientationTable, Error, Gregorian, IersC04, IersFinals2000A, JulianDate,
         ModifiedJulianDate, TimeContext, Tt, Ut1, Utc,
     },
 };
@@ -13,7 +13,7 @@ const C04: &str = include_str!("../data/eop/eop-20u24-c04-1962-now-2026-08-06.tx
 const FINALS_2000_A: &str = include_str!("../data/eop/finals2000a-2026-08-06.all");
 
 #[test]
-fn c04_snapshot_preserves_complete_values_rates_uncertainties_and_coverage() {
+fn c04_snapshot_preserves_complete_values_rates_and_coverage() {
     let data = IersC04::parse(C04).unwrap();
     assert_eq!(data.product(), EarthOrientationProduct::IersC04);
     assert_eq!(data.records().len(), 23_564);
@@ -50,29 +50,15 @@ fn c04_snapshot_preserves_complete_values_rates_uncertainties_and_coverage() {
         1.723,
         epsilon = 5.0e-7
     );
-    assert_eq!(
-        first.quality().polar_motion(),
-        Some(EarthOrientationValueKind::Final)
-    );
-    assert_eq!(
-        first.quality().celestial_pole(),
-        Some(EarthOrientationValueKind::Final)
-    );
     assert!(first.polar_motion_rate_x().is_some());
     assert!(first.polar_motion_rate_y().is_some());
-    assert!(first.uncertainty().polar_motion_x().is_some());
-    assert!(first.uncertainty().ut1_minus_utc().is_some());
-
     let time = TimeContext::builtin();
-    assert!(matches!(
-        data.try_samples(&time),
-        Err(Error::LeapSecondsUnavailable { .. })
-    ));
     let samples = data
         .try_samples_in(
             &time,
             ModifiedJulianDate::<Utc>::from_parts(41_317.0, 0.0).unwrap(),
             ModifiedJulianDate::<Utc>::from_parts(61_228.0, 0.0).unwrap(),
+            EarthOrientationAcceptance::FinalOnly,
         )
         .unwrap();
     assert_eq!(samples.len(), 19_912);
@@ -103,14 +89,6 @@ fn finals_parser_prefers_bulletin_b_and_preserves_prediction_gaps() {
         -18.637,
         epsilon = 1.0e-12
     );
-    assert_eq!(
-        first.quality().polar_motion(),
-        Some(EarthOrientationValueKind::Final)
-    );
-    assert_eq!(
-        first.quality().ut1(),
-        Some(EarthOrientationValueKind::Final)
-    );
 
     let last = data.records()[data.records().len() - 1];
     assert_abs_diff_eq!(
@@ -124,24 +102,69 @@ fn finals_parser_prefers_bulletin_b_and_preserves_prediction_gaps() {
     assert!(last.excess_length_of_day().is_none());
     assert!(last.celestial_pole_offset_x().is_none());
     assert!(last.celestial_pole_offset_y().is_none());
-    assert_eq!(
-        last.quality().polar_motion(),
-        Some(EarthOrientationValueKind::Predicted)
-    );
-    assert_eq!(
-        last.quality().ut1(),
-        Some(EarthOrientationValueKind::Predicted)
-    );
-    assert_eq!(last.quality().length_of_day(), None);
-    assert_eq!(last.quality().celestial_pole(), None);
-    let first_without_lod = data
-        .records()
-        .iter()
-        .copied()
-        .find(|record| record.modified_julian_date().as_f64_lossy() == 61_258.0)
-        .unwrap();
+    let time = TimeContext::builtin();
+    let observed_mjd = ModifiedJulianDate::<Utc>::from_parts(61_249.0, 0.0).unwrap();
     assert!(matches!(
-        first_without_lod.try_into_sample(&TimeContext::builtin()),
+        data.try_samples_in(
+            &time,
+            observed_mjd,
+            observed_mjd,
+            EarthOrientationAcceptance::FinalOnly,
+        ),
+        Err(Error::EarthOrientationValueRejected {
+            field: "polar motion xp/yp",
+            provenance: "observed",
+            acceptance: "FinalOnly",
+            ..
+        })
+    ));
+    assert_eq!(
+        data.try_samples_in(
+            &time,
+            observed_mjd,
+            observed_mjd,
+            EarthOrientationAcceptance::ObservedOrFinal,
+        )
+        .unwrap()
+        .len(),
+        1
+    );
+
+    let predicted_mjd = ModifiedJulianDate::<Utc>::from_parts(61_250.0, 0.0).unwrap();
+    assert!(matches!(
+        data.try_samples_in(
+            &time,
+            predicted_mjd,
+            predicted_mjd,
+            EarthOrientationAcceptance::ObservedOrFinal,
+        ),
+        Err(Error::EarthOrientationValueRejected {
+            field: "celestial-pole offsets dX/dY",
+            provenance: "predicted",
+            acceptance: "ObservedOrFinal",
+            ..
+        })
+    ));
+    assert_eq!(
+        data.try_samples_in(
+            &time,
+            predicted_mjd,
+            predicted_mjd,
+            EarthOrientationAcceptance::IncludePredicted,
+        )
+        .unwrap()
+        .len(),
+        1
+    );
+
+    let incomplete_mjd = ModifiedJulianDate::<Utc>::from_parts(61_258.0, 0.0).unwrap();
+    assert!(matches!(
+        data.try_samples_in(
+            &time,
+            incomplete_mjd,
+            incomplete_mjd,
+            EarthOrientationAcceptance::IncludePredicted,
+        ),
         Err(Error::MissingEarthOrientationValue {
             field: "length of day",
             ..
@@ -167,6 +190,7 @@ fn complete_gcrs_itrs_chain_matches_sofa_and_round_trips_state() {
             &base,
             ModifiedJulianDate::<Utc>::from_parts(41_317.0, 0.0).unwrap(),
             ModifiedJulianDate::<Utc>::from_parts(61_228.0, 0.0).unwrap(),
+            EarthOrientationAcceptance::FinalOnly,
         )
         .unwrap();
     let expires = base

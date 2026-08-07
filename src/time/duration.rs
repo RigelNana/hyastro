@@ -1,3 +1,8 @@
+use crate::constants::time::{
+    NANOSECONDS_PER_DAY, NANOSECONDS_PER_JULIAN_YEAR, NANOSECONDS_PER_MICROSECOND,
+    NANOSECONDS_PER_MILLISECOND, NANOSECONDS_PER_SECOND,
+};
+
 use super::Error;
 
 /// A signed physical duration stored exactly as integer nanoseconds.
@@ -8,11 +13,11 @@ pub struct Duration {
 
 impl Duration {
     /// Number of nanoseconds in one SI second.
-    pub const NANOSECONDS_PER_SECOND: i128 = 1_000_000_000;
+    pub const NANOSECONDS_PER_SECOND: i128 = NANOSECONDS_PER_SECOND;
     /// Number of nanoseconds in one nominal 86,400-second day.
-    pub const NANOSECONDS_PER_DAY: i128 = 86_400 * Self::NANOSECONDS_PER_SECOND;
+    pub const NANOSECONDS_PER_DAY: i128 = NANOSECONDS_PER_DAY;
     /// Number of nanoseconds in one 365.25-day Julian year.
-    pub const NANOSECONDS_PER_JULIAN_YEAR: i128 = 36525 * Self::NANOSECONDS_PER_DAY / 100;
+    pub const NANOSECONDS_PER_JULIAN_YEAR: i128 = NANOSECONDS_PER_JULIAN_YEAR;
     /// A zero-length duration.
     pub const ZERO: Self = Self { nanoseconds: 0 };
 
@@ -47,7 +52,7 @@ impl Duration {
     /// Constructs a duration from whole milliseconds.
     pub fn from_milliseconds(milliseconds: i64) -> Result<Self, Error> {
         i128::from(milliseconds)
-            .checked_mul(1_000_000)
+            .checked_mul(NANOSECONDS_PER_MILLISECOND)
             .map(Self::from_nanoseconds)
             .ok_or(Error::Overflow {
                 operation: "constructing duration from milliseconds",
@@ -57,7 +62,7 @@ impl Duration {
     /// Constructs a duration from whole microseconds.
     pub fn from_microseconds(microseconds: i64) -> Result<Self, Error> {
         i128::from(microseconds)
-            .checked_mul(1_000)
+            .checked_mul(NANOSECONDS_PER_MICROSECOND)
             .map(Self::from_nanoseconds)
             .ok_or(Error::Overflow {
                 operation: "constructing duration from microseconds",

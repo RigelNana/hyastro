@@ -2,6 +2,8 @@ use core::{fmt, marker::PhantomData};
 
 use libm::{floor, round};
 
+use crate::constants::time::{J2000_JULIAN_DATE, MAX_EXACT_BINARY64_INTEGER};
+
 use super::{
     Calendar, Date, DateTime, Duration, Error, Instant, JulianDayNumber, TimeOfDay, TimeScale,
     TimeScaleModel, Tt,
@@ -16,7 +18,7 @@ pub struct JulianDate<S: TimeScale> {
 
 impl<S: TimeScale> JulianDate<S> {
     /// Julian Date of J2000.0 in TT.
-    pub const J2000_VALUE: f64 = 2_451_545.0;
+    pub const J2000_VALUE: f64 = J2000_JULIAN_DATE;
 
     /// Constructs a Julian Date from any finite two-part split.
     pub fn from_parts(first: f64, second: f64) -> Result<Self, Error> {
@@ -83,8 +85,7 @@ impl<S: TimeScale> JulianDate<S> {
         let whole_days = duration
             .as_nanoseconds()
             .div_euclid(Duration::NANOSECONDS_PER_DAY);
-        const MAX_EXACT_F64_INTEGER: i128 = 9_007_199_254_740_992;
-        if !(-MAX_EXACT_F64_INTEGER..=MAX_EXACT_F64_INTEGER).contains(&whole_days) {
+        if !(-MAX_EXACT_BINARY64_INTEGER..=MAX_EXACT_BINARY64_INTEGER).contains(&whole_days) {
             return Err(Error::Overflow {
                 operation: "adding an inexact whole-day count to Julian Date",
             });

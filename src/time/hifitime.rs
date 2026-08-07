@@ -2,6 +2,8 @@ use hifitime::{
     Duration as HifitimeDuration, Epoch as HifitimeEpoch, TimeScale as HifitimeTimeScale,
 };
 
+use crate::constants::time::{IAU_1977_REFERENCE_JULIAN_DATE, SECONDS_PER_DAY};
+
 use super::{
     Calendar, Date, DateTime, Duration, Error, Gps, Gregorian, Instant, JulianDate, Tai, Tcb, Tcg,
     Tdb, TimeOfDay, TimeScale, TimeScaleModel, Tt, UnixTimestamp, Utc, context::sealed,
@@ -149,9 +151,11 @@ impl Hifitime {
             HifitimeTimeScale::TCB => 32.184_065_5,
             _ => return Ok(None),
         };
-        const SECONDS_PER_DAY: f64 = 86_400.0;
         let scaled = epoch.to_time_scale(scale);
-        let reference = JulianDate::from_parts(2_443_144.5, reference_seconds / SECONDS_PER_DAY)?;
+        let reference = JulianDate::from_parts(
+            IAU_1977_REFERENCE_JULIAN_DATE,
+            reference_seconds / SECONDS_PER_DAY as f64,
+        )?;
         reference
             .checked_add_duration(Duration::from_nanoseconds(
                 scaled.duration.total_nanoseconds(),

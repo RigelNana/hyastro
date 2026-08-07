@@ -1,10 +1,12 @@
-use core::f64::consts::PI;
-
-use crate::math::{Angle, AngularSpeed};
+use crate::{
+    constants::{
+        angle::{MILLIARCSECONDS_PER_ARCSECOND, RADIANS_PER_ARCSECOND},
+        time::MILLISECONDS_PER_SECOND,
+    },
+    math::{Angle, AngularSpeed},
+};
 
 use super::{Duration, Error, Instant, LeapSeconds, Tai, TimeScale, Utc};
-
-const RADIANS_PER_ARCSECOND: f64 = PI / (180.0 * 3_600.0);
 
 /// The observed difference `UT1−UTC`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -65,7 +67,9 @@ pub struct ExcessLengthOfDay(Duration);
 impl ExcessLengthOfDay {
     /// Constructs excess length of day from fractional milliseconds.
     pub fn from_milliseconds(milliseconds: f64) -> Result<Self, Error> {
-        Self::from_duration(Duration::from_seconds_f64(milliseconds / 1_000.0)?)
+        Self::from_duration(Duration::from_seconds_f64(
+            milliseconds / MILLISECONDS_PER_SECOND,
+        )?)
     }
 
     /// Constructs excess length of day from an exact duration.
@@ -88,7 +92,7 @@ impl ExcessLengthOfDay {
 
     /// Returns excess length of day in milliseconds.
     pub fn as_milliseconds(self) -> f64 {
-        self.0.as_seconds_f64() * 1_000.0
+        self.0.as_seconds_f64() * MILLISECONDS_PER_SECOND
     }
 }
 
@@ -149,7 +153,8 @@ pub struct CelestialPoleOffsetX(Angle);
 impl CelestialPoleOffsetX {
     /// Constructs $dX$ from milliarcseconds.
     pub fn from_milliarcseconds(milliarcseconds: f64) -> Result<Self, crate::math::Error> {
-        Angle::from_radians(milliarcseconds * RADIANS_PER_ARCSECOND / 1_000.0).map(Self)
+        Angle::from_radians(milliarcseconds * RADIANS_PER_ARCSECOND / MILLIARCSECONDS_PER_ARCSECOND)
+            .map(Self)
     }
 
     /// Returns $dX$ as an unrestricted angle.
@@ -159,7 +164,7 @@ impl CelestialPoleOffsetX {
 
     /// Returns $dX$ in milliarcseconds.
     pub fn as_milliarcseconds(self) -> f64 {
-        self.0.as_radians() / RADIANS_PER_ARCSECOND * 1_000.0
+        self.0.as_radians() / RADIANS_PER_ARCSECOND * MILLIARCSECONDS_PER_ARCSECOND
     }
 
     fn from_angle(angle: Angle) -> Self {
@@ -174,7 +179,8 @@ pub struct CelestialPoleOffsetY(Angle);
 impl CelestialPoleOffsetY {
     /// Constructs $dY$ from milliarcseconds.
     pub fn from_milliarcseconds(milliarcseconds: f64) -> Result<Self, crate::math::Error> {
-        Angle::from_radians(milliarcseconds * RADIANS_PER_ARCSECOND / 1_000.0).map(Self)
+        Angle::from_radians(milliarcseconds * RADIANS_PER_ARCSECOND / MILLIARCSECONDS_PER_ARCSECOND)
+            .map(Self)
     }
 
     /// Returns $dY$ as an unrestricted angle.
@@ -184,7 +190,7 @@ impl CelestialPoleOffsetY {
 
     /// Returns $dY$ in milliarcseconds.
     pub fn as_milliarcseconds(self) -> f64 {
-        self.0.as_radians() / RADIANS_PER_ARCSECOND * 1_000.0
+        self.0.as_radians() / RADIANS_PER_ARCSECOND * MILLIARCSECONDS_PER_ARCSECOND
     }
 
     fn from_angle(angle: Angle) -> Self {

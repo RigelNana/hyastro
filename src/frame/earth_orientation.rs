@@ -1,4 +1,9 @@
 use crate::{
+    constants::earth::{
+        ROTATION_DETERMINANT_TOLERANCE, ROTATION_ORTHOGONALITY_TOLERANCE,
+        ROTATION_RATE_CONVERGENCE_TOLERANCE_RADIANS_PER_SECOND,
+        ROTATION_RATE_DIFFERENCE_STEP_SECONDS,
+    },
     math::{Angle, AngularSpeed, Matrix3, Rotation, RotationTolerance, Vector3},
     time::{
         Duration, EarthOrientation, EarthOrientationTable, Instant, JulianDate, TimeContext,
@@ -7,9 +12,6 @@ use crate::{
 };
 
 use super::{Cirs, CoordinateFrame, Error, Gcrs, Itrs, Tirs};
-
-const DIFFERENCE_STEP_SECONDS: f64 = 3_600.0;
-const ROTATION_RATE_TOLERANCE_RADIANS_PER_SECOND: f64 = 5.0e-16;
 
 pub(super) struct KinematicRotation<From, To>
 where
@@ -144,11 +146,11 @@ impl RotationRate {
     {
         let current = evaluate(0.0)?;
         let coarse = Self::central_derivative(
-            evaluate(-DIFFERENCE_STEP_SECONDS)?,
-            evaluate(DIFFERENCE_STEP_SECONDS)?,
-            DIFFERENCE_STEP_SECONDS,
+            evaluate(-ROTATION_RATE_DIFFERENCE_STEP_SECONDS)?,
+            evaluate(ROTATION_RATE_DIFFERENCE_STEP_SECONDS)?,
+            ROTATION_RATE_DIFFERENCE_STEP_SECONDS,
         )?;
-        let fine_step = DIFFERENCE_STEP_SECONDS / 2.0;
+        let fine_step = ROTATION_RATE_DIFFERENCE_STEP_SECONDS / 2.0;
         let fine =
             Self::central_derivative(evaluate(-fine_step)?, evaluate(fine_step)?, fine_step)?;
         let coarse_omega = Self::axial(current, coarse)?;
@@ -163,14 +165,17 @@ impl RotationRate {
 
         let extrapolated_derivative = Self::richardson_derivative(coarse, fine)?;
         residual = residual.max(Self::skew_residual(current, extrapolated_derivative)?);
-        if residual > ROTATION_RATE_TOLERANCE_RADIANS_PER_SECOND {
+        if residual > ROTATION_RATE_CONVERGENCE_TOLERANCE_RADIANS_PER_SECOND {
             return Err(Error::RotationRateDidNotConverge {
                 residual,
-                tolerance: ROTATION_RATE_TOLERANCE_RADIANS_PER_SECOND,
+                tolerance: ROTATION_RATE_CONVERGENCE_TOLERANCE_RADIANS_PER_SECOND,
             });
         }
 
-        let tolerance = RotationTolerance::new(1.0e-12, 1.0e-12)?;
+        let tolerance = RotationTolerance::new(
+            ROTATION_ORTHOGONALITY_TOLERANCE,
+            ROTATION_DETERMINANT_TOLERANCE,
+        )?;
         let rotation = Rotation::<From, To>::try_from_matrix(current, tolerance)?;
         let angular_velocity = Vector3::from_array([
             AngularSpeed::from_radians_per_second(extrapolated[0])?,

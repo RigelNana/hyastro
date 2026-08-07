@@ -3,9 +3,10 @@ use core::f64::consts::{FRAC_PI_2, PI, TAU};
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use garde::Validate;
 use hyastro::math::{
-    Angle, Declination, Direction, EquatorialDirection, Error, Latitude, Length, Longitude,
-    Matrix3, PositionAngle, Quaternion, RightAscension, RootOptions, Rotation, RotationTolerance,
-    Separation, SphericalDirection, Vector3,
+    Angle, Declination, DegreesMinutesSeconds, Direction, EquatorialDirection, Error, HourAngle,
+    HoursMinutesSeconds, Latitude, Length, Longitude, Matrix3, PositionAngle, Quaternion,
+    RightAscension, RootOptions, Rotation, RotationTolerance, Separation, SexagesimalSign,
+    SphericalDirection, Vector3,
 };
 use proptest::prelude::*;
 use rstest::rstest;
@@ -65,6 +66,98 @@ proptest! {
         prop_assert!(longitude.as_radians() > -PI);
         prop_assert!(longitude.as_radians() <= PI);
     }
+}
+
+#[test]
+fn hour_angle_uses_the_zero_to_twenty_four_hour_interval() {
+    assert_eq!(HourAngle::try_from_hours(0.0).unwrap().as_hours(), 0.0);
+    assert_eq!(HourAngle::try_from_hours(23.5).unwrap().as_hours(), 23.5);
+    assert!(matches!(
+        HourAngle::try_from_hours(-f64::EPSILON),
+        Err(Error::OutOfRange { .. })
+    ));
+    assert!(matches!(
+        HourAngle::try_from_hours(24.0),
+        Err(Error::OutOfRange { .. })
+    ));
+    assert_abs_diff_eq!(
+        HourAngle::wrap_hours(-1.0).unwrap().as_hours(),
+        23.0,
+        epsilon = 4.0e-15
+    );
+    assert_abs_diff_eq!(
+        HourAngle::wrap_hours(25.0).unwrap().as_hours(),
+        1.0,
+        epsilon = 4.0e-15
+    );
+}
+
+#[test]
+fn hms_parses_converts_and_formats_with_carry() {
+    let expected = HoursMinutesSeconds::new(12, 34, 56.75).unwrap();
+    assert_eq!("12:34:56.75".parse(), Ok(expected));
+    assert_eq!("12h34m56.75s".parse(), Ok(expected));
+    assert_eq!("12 34 56.75".parse(), Ok(expected));
+
+    let right_ascension = RightAscension::try_from_hms(expected).unwrap();
+    let restored = right_ascension.to_hms();
+    assert_eq!(restored.hours(), 12);
+    assert_eq!(restored.minutes(), 34);
+    assert_abs_diff_eq!(restored.seconds(), 56.75, epsilon = 2.0e-11);
+
+    let rounds_across_zero = HoursMinutesSeconds::new(23, 59, 59.999_6).unwrap();
+    assert_eq!(format!("{rounds_across_zero:.3}"), "00h00m00.000s");
+    let canonical_zero = HoursMinutesSeconds::new(0, 0, -0.0).unwrap();
+    assert_eq!(canonical_zero.to_string(), "00h00m00s");
+    assert!(matches!(
+        HoursMinutesSeconds::new(24, 0, 0.0),
+        Err(Error::OutOfRange { .. })
+    ));
+    assert!(matches!(
+        "12:60:00".parse::<HoursMinutesSeconds>(),
+        Err(Error::OutOfRange { .. })
+    ));
+}
+
+#[test]
+fn dms_preserves_sign_parses_unicode_and_formats_with_carry() {
+    let negative_zero: DegreesMinutesSeconds = "-00°00′00″".parse().unwrap();
+    assert_eq!(negative_zero.sign(), SexagesimalSign::Negative);
+    assert!(negative_zero.as_decimal_degrees().is_sign_negative());
+    assert_eq!(negative_zero.to_string(), "-00°00′00″");
+
+    let expected = DegreesMinutesSeconds::new(SexagesimalSign::Negative, 12, 34, 56.75).unwrap();
+    assert_eq!("-12:34:56.75".parse(), Ok(expected));
+    assert_eq!("−12°34′56.75″".parse(), Ok(expected));
+    assert_eq!("-12d34m56.75s".parse(), Ok(expected));
+    assert_eq!("-12 34 56.75".parse(), Ok(expected));
+
+    let carries = DegreesMinutesSeconds::new(SexagesimalSign::Positive, 12, 59, 59.999_6).unwrap();
+    assert_eq!(format!("{carries:.3}"), "+13°00′00.000″");
+}
+
+#[test]
+fn semantic_dms_conversions_enforce_angle_boundaries() {
+    let north_pole = DegreesMinutesSeconds::new(SexagesimalSign::Positive, 90, 0, 0.0).unwrap();
+    assert_eq!(
+        Declination::try_from_dms(north_pole).unwrap().to_dms(),
+        north_pole
+    );
+
+    let beyond_north_pole =
+        DegreesMinutesSeconds::new(SexagesimalSign::Positive, 90, 0, 0.1).unwrap();
+    assert!(matches!(
+        Declination::try_from_dms(beyond_north_pole),
+        Err(Error::OutOfRange { .. })
+    ));
+
+    let west = DegreesMinutesSeconds::new(SexagesimalSign::Negative, 73, 59, 8.25).unwrap();
+    let longitude = Longitude::try_from_dms(west).unwrap();
+    assert_abs_diff_eq!(
+        longitude.to_dms().as_decimal_degrees(),
+        west.as_decimal_degrees(),
+        epsilon = 1.0e-14
+    );
 }
 
 #[test]

@@ -72,6 +72,8 @@ pub struct Speed(f64);
 - `try_*` 验证范围并保留输入含义，例如 `Declination::try_deg(91.0)` 返回范围错误。
 - `wrap_*` 执行该语义允许的规范化，例如 `Longitude::wrap_deg(361.0)` 得到 `1°`。
 
+`RightAscension` 与 `HourAngle` 都使用 `[0, 2π)`，也就是 `[0h, 24h)` 的规范区间。`HoursMinutesSeconds` 表达该无符号周期区间；`DegreesMinutesSeconds` 使用独立的 `SexagesimalSign` 保存正负号，因此能区分正零与负零。两者只负责六十进制表示和文本往返，不承担民用时间语义。
+
 同维量可以显式转换单位。不同语义量不提供隐式 `From`，需要命名转换，例如 `Altitude::zenith_distance()`。
 
 ### 3.2 空间、时间和变换
@@ -140,7 +142,7 @@ v_to = R_from_to v_from + ω × (R_from_to r_from) + t_dot
 - `JulianDate<S>`、`ModifiedJulianDate<S>`：保留双分量的连续日表示。
 - `Epoch<S>`：供坐标、星表或轨道参数引用的参考瞬间。
 - `LeapSeconds<'a>`：无分配、版本化的闰秒数据，显式保存起始偏移、覆盖范围和过期日；`LeapSecond` 只表示真正的 ±1 秒事件。
-- `EarthOrientationRecord`：IERS 原始记录的完整领域表示；保留产品类型、UTC/MJD 历元、各分量的可选值、每域观测/预报质量标记和可选不确定度。`EarthOrientationData` 保存同一产品解析后的有序记录，并只在调用者指定的覆盖区间内严格转换成完整样本。
+- `EarthOrientationRecord`：IERS 解析后的强类型记录，保留 UTC/MJD 历元、计算分量和原始空列。`EarthOrientationData` 保存同一产品的有序记录；调用者只能通过带覆盖区间和 `EarthOrientationAcceptance` 的 `try_samples_in` 转换完整样本。观测/预报来源在模块内部按极移、UT1、LOD、天极四域执行，拒绝项不会被静默跳过；源误差列在没有协方差传播模型前不进入公共接口。
 - `EarthOrientationSample`：可进入计算热路径的完整 EOP 样本，包含某个 UTC 标记物理瞬间的 `UT1−UTC`、LOD、`xp`、`yp`、`dX`、`dY` 强类型值，以及可选的极移变化率。原始空列不能转换为零；缺少算法必需量时转换明确失败。
 - `EarthOrientationTable<'a>`：不可变、版本化、带覆盖和过期边界的 EOP 数据；只在首末样本闭区间内线性插值，不外推；跨闰秒先插值连续的 `UT1−TAI`。存在相邻样本时，表可由样本差分推导极移与天极偏差变化率。
 

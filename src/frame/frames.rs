@@ -1,4 +1,11 @@
 use crate::{
+    constants::{
+        earth::{
+            NOMINAL_ANGULAR_SPEED_RADIANS_PER_SECOND, ROTATION_DETERMINANT_TOLERANCE,
+            ROTATION_ORTHOGONALITY_TOLERANCE,
+        },
+        time::SECONDS_PER_DAY,
+    },
     math::{AngularSpeed, Length, Matrix3, Rotation, RotationTolerance, Speed, Vector3},
     time::{EarthOrientationTable, Instant, TimeContext, TimeScale},
 };
@@ -86,9 +93,6 @@ impl<'context, 'leap, 'eop> Frames<'context, 'leap, 'eop> {
         &self,
         epoch: Instant<S>,
     ) -> Result<StateTransform<Cirs, Tirs, S>, Error> {
-        const NOMINAL_DAY_SECONDS: f64 = 86_400.0;
-        const NOMINAL_EARTH_ANGULAR_SPEED: f64 = 7.292_115_0e-5;
-
         let orientation = self.time.earth_orientation_at(epoch)?;
         let ut1 = self.time.julian_date_from_orientation(epoch, orientation)?;
         let (ut1_first, ut1_second) = ut1.parts();
@@ -98,7 +102,10 @@ impl<'context, 'leap, 'eop> Frames<'context, 'leap, 'eop> {
         sofars::vm::ir(&mut rows);
         sofars::vm::rz(earth_rotation_angle, &mut rows);
         let matrix = Matrix3::try_from_rows(rows)?;
-        let tolerance = RotationTolerance::new(1.0e-12, 1.0e-12)?;
+        let tolerance = RotationTolerance::new(
+            ROTATION_ORTHOGONALITY_TOLERANCE,
+            ROTATION_DETERMINANT_TOLERANCE,
+        )?;
         let rotation = Rotation::<Cirs, Tirs>::try_from_matrix(matrix, tolerance)?;
         let frame_rotation = FrameRotation::new(epoch, rotation);
 
@@ -106,8 +113,9 @@ impl<'context, 'leap, 'eop> Frames<'context, 'leap, 'eop> {
             .excess_length_of_day()
             .as_duration()
             .as_seconds_f64();
-        let angular_speed = NOMINAL_EARTH_ANGULAR_SPEED * NOMINAL_DAY_SECONDS
-            / (NOMINAL_DAY_SECONDS + excess_day_seconds);
+        let nominal_day_seconds = SECONDS_PER_DAY as f64;
+        let angular_speed = NOMINAL_ANGULAR_SPEED_RADIANS_PER_SECOND * nominal_day_seconds
+            / (nominal_day_seconds + excess_day_seconds);
         let zero_angular_speed = AngularSpeed::from_radians_per_second(0.0)?;
         let negative_angular_speed = AngularSpeed::from_radians_per_second(-angular_speed)?;
         let zero_length = Length::from_metres(0.0)?;

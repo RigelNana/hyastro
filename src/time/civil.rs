@@ -1,5 +1,9 @@
 use core::{fmt, marker::PhantomData};
 
+use crate::constants::time::{
+    NANOSECONDS_PER_DAY, NANOSECONDS_PER_SECOND, SECONDS_PER_HOUR, SECONDS_PER_MINUTE,
+};
+
 use super::{Calendar, Date, Error, TimeScale, Utc};
 
 /// A validated time-of-day label with nanosecond precision.
@@ -68,27 +72,28 @@ impl TimeOfDay {
     /// A leap-second label returns a value in the additional second following
     /// the first 86,400 seconds.
     pub fn nanoseconds_since_midnight(self) -> u64 {
-        (u64::from(self.hour) * 3_600 + u64::from(self.minute) * 60 + u64::from(self.second))
-            * 1_000_000_000
+        (u64::from(self.hour) * SECONDS_PER_HOUR as u64
+            + u64::from(self.minute) * SECONDS_PER_MINUTE as u64
+            + u64::from(self.second))
+            * NANOSECONDS_PER_SECOND as u64
             + u64::from(self.nanosecond)
     }
 
     /// Constructs a conventional time from nanoseconds in a nominal day.
     pub fn from_nanoseconds_since_midnight(value: u64) -> Result<Self, Error> {
-        const NANOS_PER_DAY: u64 = 86_400_000_000_000;
-        if value >= NANOS_PER_DAY {
+        if value >= NANOSECONDS_PER_DAY as u64 {
             return Err(Error::component(
                 "nanoseconds since midnight",
                 i128::from(value),
                 0,
-                i128::from(NANOS_PER_DAY - 1),
+                NANOSECONDS_PER_DAY - 1,
             ));
         }
-        let seconds = value / 1_000_000_000;
-        let nanosecond = (value % 1_000_000_000) as u32;
-        let hour = (seconds / 3_600) as u8;
-        let minute = ((seconds % 3_600) / 60) as u8;
-        let second = (seconds % 60) as u8;
+        let seconds = value / NANOSECONDS_PER_SECOND as u64;
+        let nanosecond = (value % NANOSECONDS_PER_SECOND as u64) as u32;
+        let hour = (seconds / SECONDS_PER_HOUR as u64) as u8;
+        let minute = ((seconds % SECONDS_PER_HOUR as u64) / SECONDS_PER_MINUTE as u64) as u8;
+        let second = (seconds % SECONDS_PER_MINUTE as u64) as u8;
         Self::new(hour, minute, second, nanosecond)
     }
 

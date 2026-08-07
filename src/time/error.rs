@@ -174,6 +174,21 @@ pub enum Error {
         /// Record epoch as TAI nanoseconds since 1900-01-01 TAI.
         epoch_tai_nanoseconds: i128,
     },
+    /// A parsed EOP value is less authoritative than the caller permits.
+    #[cfg(feature = "std")]
+    #[error(
+        "Earth-orientation source line {line} has {provenance} {field}, rejected by {acceptance}"
+    )]
+    EarthOrientationValueRejected {
+        /// One-based source line.
+        line: usize,
+        /// Semantic value group that failed the policy.
+        field: &'static str,
+        /// Parsed provenance class.
+        provenance: &'static str,
+        /// Active acceptance policy.
+        acceptance: &'static str,
+    },
     /// Earth-orientation samples do not cover a requested physical instant.
     #[error(
         "Earth-orientation data covers [{coverage_start}, {coverage_end}] TAI ns, not requested instant {requested} TAI ns"

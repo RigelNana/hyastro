@@ -82,7 +82,7 @@
 | bzip2 | **明确不采用** | FFI + 低频用途 |
 | fitsio | **明确不采用** | 生产基线不引入 cfitsio FFI；完整 FITS 写入需求须另立决策 |
 | celestial（gaker） | **明确不采用** | 第二套领域模型（时间/帧/坐标），与 hyastro 强类型冲突 |
-| celestial-eop-data | **明确不采用** | 数据模型无观测/预报标志与不确定度；hyastro 使用 `EarthOrientationRecord` / `EarthOrientationData` 保留完整 IERS 语义 |
+| celestial-eop-data | **明确不采用** | 丢失观测/预报标志，并把缺失预测字段写成零；hyastro 在样本转换时执行显式来源接纳策略 |
 | uom 之外的其它单位 crate（dimensional 等） | **明确不采用** | 同 uom 理由 |
 | polars | **明确不采用（生产）** | 仅 ANISE dev-deps 使用；hyastro 用 arrow/parquet 直接接口 |
 
@@ -482,7 +482,7 @@ ANISE 0.10.4 满足"生产级 SPICE/DAF/SPK/PCK/参考系后端"定位：纯 Rus
 
 - crates.io 元数据与仓库（`gaker/celestial-eop-data`）：Apache-2.0 仓库（GitHub license 字段）＋ 仓库 LICENSE-APACHE/LICENSE-MIT 双文件、Cargo.toml `license = "MIT OR Apache-2.0"`；最新发布 0.1.x（主代理提供 crates.io 当前 0.1.12；仓库 HEAD 为 0.1.21）。
 - 机制核查 [观察]：`build.rs` 在**构建期**解析仓库内 `data/eopc04.1962-now` 与 `data/finals2000A.all`（IERS 官方格式文本）并压缩为 zstd 二进制内嵌——**构建期不联网**；数据由维护者 GitHub Action 每周更新（README 自述）；运行时零联网（懒加载内嵌数据）；来源固定为 IERS C04 + finals2000A。
-- 为什么不采用（核心）：(1) 数据模型不满足 PRD TIME-DAT-002/003——`EopEntry` 只有 `mjd/x_p/y_p/ut1_utc/lod/dx/dy`，**丢失观测/预报标志与不确定度**，C04 与 finals 混合时无法区分数据性质；(2) 每周更新的发布节奏导致版本漂移快、可复现性差（类似 ANISE 的 earth_latest_high_prec.bpc 问题）；(3) 自定义二进制容器（EOP1 魔数 + zstd）是外来格式，需转换层；(4) `build.rs` 依赖外部 `date` 命令（`chrono_free_utc_date` 调用 `date -u`），Windows 构建不可移植 [推断]。
+- 为什么不采用（核心）：(1) `EopEntry` 丢失观测/预报标志，且构建期 finals 解析器把缺失 LOD、`dX/dY` 写成 `0.0`，无法执行显式来源接纳策略或区分“缺失”和“真实零”；(2) 每周更新的发布节奏导致版本漂移快、可复现性差（类似 ANISE 的 earth_latest_high_prec.bpc 问题）；(3) 自定义二进制容器（EOP1 魔数 + zstd）是外来格式，需转换层；(4) `build.rs` 依赖外部 `date` 命令（`chrono_free_utc_date` 调用 `date -u`），Windows 构建不可移植 [推断]。
 - 结论：hyastro 自有 `EopProvider` 接口（PRD 4.2）+ `finals2000A.all`/`C04` 解析器（自有实现，IERS 原始格式）为规范；celestial-eop-data **不进入依赖**。其数据可作为开发验证期的参考对照源（人工核对，非自动依赖）。
 
 #### 3.6.7 celestial / siderust 聚合天文 crate —— **明确不采用**
@@ -660,7 +660,7 @@ flowchart LR
 3. **数据下载策略**（核心离线，PRD 4.2）：
    - hyastro 数据工具（独立命令/脚本，非库行为）下载 SPK/PCK/EOP/星表：**必须 HTTPS**（规避 ANISE metaload 的 http:// 端点风险，见 2.9）、固定 URL + CRC32/sha256 校验、记录数据版本/日期/来源；
    - 版本快照化：`de440s.bsp`、`pck11.pca`、`moon_fk_de440.epa`、`moon_pa_de440_200625.bpc`（ANISE Default 集，CRC32 已给出）、`earth_latest_high_prec.bpc` 改为**日期戳固定版**（不追每日更新）；
-   - EOP：仓库固定 `2026-08-06` 的 IERS EOP 20u24 C04 与 finals2000A 原始快照，URL、SHA-256、记录数和有效列边界记录于 `data/eop/SOURCES.toml`；`IersC04` / `IersFinals2000A` 解析器保留观测/预报标志、不确定度和空列，调用者显式选择转换为完整样本的区间；
+   - EOP：仓库固定 `2026-08-06` 的 IERS EOP 20u24 C04 与 finals2000A 原始快照，URL、SHA-256、记录数和有效列边界记录于 `data/eop/SOURCES.toml`；`IersC04` / `IersFinals2000A` 保留空列和内部来源标记，`try_samples_in` 要求调用者显式选择覆盖区间及 `FinalOnly` / `ObservedOrFinal` / `IncludePredicted` 接纳策略；
    - 构建期：**禁止**任何 build.rs 联网（anise 的 `embed_ephem` 特征模式不采用）。
 4. **依赖审计门禁**：cargo-audit（漏洞）+ cargo-deny（许可/bans）+ cargo-semver-checks（升级破坏检测）+ cargo-msrv（MSRV 回归）四件套进 CI；参考源码 commit（ref/）只用于调研与差分，不成为构建输入（CODE_STANDARDS 15 节）。
 

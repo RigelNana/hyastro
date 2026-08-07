@@ -6,6 +6,7 @@ mod matrix;
 mod numeric;
 mod quantity;
 mod rotation;
+mod sexagesimal;
 mod sphere;
 mod vector;
 
@@ -18,5 +19,6 @@ pub use matrix::Matrix3;
 pub use numeric::{RootOptions, RootResult};
 pub use quantity::{Acceleration, AngularSpeed, Coordinate, Dimensionless, Length, Speed, Squared};
 pub use rotation::{Quaternion, Rotation, RotationTolerance};
+pub use sexagesimal::{DegreesMinutesSeconds, HoursMinutesSeconds, SexagesimalSign};
 pub use sphere::{EquatorialDirection, SphericalDirection, TangentBasis};
 pub use vector::{Direction, Point3, Vector3};

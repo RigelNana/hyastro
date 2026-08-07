@@ -30,8 +30,8 @@ pub use error::Error;
 pub use hifitime::{Hifitime, HifitimeScale};
 #[cfg(feature = "std")]
 pub use iers::{
-    EarthOrientationData, EarthOrientationProduct, EarthOrientationQuality, EarthOrientationRecord,
-    EarthOrientationUncertainty, EarthOrientationValueKind, IersC04, IersFinals2000A,
+    EarthOrientationAcceptance, EarthOrientationData, EarthOrientationProduct,
+    EarthOrientationRecord, IersC04, IersFinals2000A,
 };
 pub use instant::{Epoch, Instant, UnixTimestamp};
 #[cfg(feature = "jiff")]

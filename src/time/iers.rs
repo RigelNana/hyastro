@@ -1,16 +1,18 @@
-use core::f64::consts::PI;
 use std::{str::SplitWhitespace, vec::Vec};
 
-use crate::math::{Angle, AngularSpeed};
+use crate::{
+    constants::{
+        angle::{MILLIARCSECONDS_PER_ARCSECOND, RADIANS_PER_ARCSECOND},
+        time::SECONDS_PER_DAY,
+    },
+    math::AngularSpeed,
+};
 
 use super::{
     CelestialPoleOffsetX, CelestialPoleOffsetY, DateTime, Duration, EarthOrientationSample, Error,
     ExcessLengthOfDay, Gregorian, ModifiedJulianDate, PolarMotionX, PolarMotionY, TimeContext,
     Ut1MinusUtc, Utc,
 };
-
-const RADIANS_PER_ARCSECOND: f64 = PI / (180.0 * 3_600.0);
-const SECONDS_PER_DAY: f64 = 86_400.0;
 
 /// An IERS Earth-orientation product understood by the built-in text adapters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -22,101 +24,103 @@ pub enum EarthOrientationProduct {
     IersFinals2000A,
 }
 
-/// Provenance class attached to one group of EOP values.
+/// Maximum provenance class accepted when converting parsed EOP records.
+///
+/// The policy is checked independently for polar motion, `UT1−UTC`, LOD, and
+/// celestial-pole offsets. It never permits a missing value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum EarthOrientationValueKind {
-    /// A final value from the IERS C04 or Bulletin B series.
+pub enum EarthOrientationAcceptance {
+    /// Accept only values from C04 or final Bulletin B columns.
+    FinalOnly,
+    /// Accept final values and measured rapid-service values marked `I`.
+    ObservedOrFinal,
+    /// Explicitly accept predicted rapid-service values marked `P`.
+    IncludePredicted,
+}
+
+impl EarthOrientationAcceptance {
+    const fn accepts(self, provenance: ValueProvenance) -> bool {
+        match self {
+            Self::FinalOnly => matches!(provenance, ValueProvenance::Final),
+            Self::ObservedOrFinal => {
+                matches!(
+                    provenance,
+                    ValueProvenance::Final | ValueProvenance::Observed
+                )
+            }
+            Self::IncludePredicted => true,
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::FinalOnly => "FinalOnly",
+            Self::ObservedOrFinal => "ObservedOrFinal",
+            Self::IncludePredicted => "IncludePredicted",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ValueProvenance {
     Final,
-    /// A measured rapid-service value marked `I` by Bulletin A.
     Observed,
-    /// A predicted rapid-service value marked `P` by Bulletin A.
     Predicted,
 }
 
-/// Per-group provenance for a normalized EOP record.
+impl ValueProvenance {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Final => "final",
+            Self::Observed => "observed",
+            Self::Predicted => "predicted",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EarthOrientationQuality {
-    polar_motion: Option<EarthOrientationValueKind>,
-    ut1: Option<EarthOrientationValueKind>,
-    length_of_day: Option<EarthOrientationValueKind>,
-    celestial_pole: Option<EarthOrientationValueKind>,
+struct RecordProvenance {
+    polar_motion: Option<ValueProvenance>,
+    ut1: Option<ValueProvenance>,
+    length_of_day: Option<ValueProvenance>,
+    celestial_pole: Option<ValueProvenance>,
 }
 
-impl EarthOrientationQuality {
-    /// Returns the provenance of `xp/yp`, when those values are present.
-    pub const fn polar_motion(self) -> Option<EarthOrientationValueKind> {
-        self.polar_motion
+impl RecordProvenance {
+    fn ensure_accepted(
+        self,
+        line: usize,
+        acceptance: EarthOrientationAcceptance,
+    ) -> Result<(), Error> {
+        Self::ensure_field(line, "polar motion xp/yp", self.polar_motion, acceptance)?;
+        Self::ensure_field(line, "UT1−UTC", self.ut1, acceptance)?;
+        Self::ensure_field(line, "length of day", self.length_of_day, acceptance)?;
+        Self::ensure_field(
+            line,
+            "celestial-pole offsets dX/dY",
+            self.celestial_pole,
+            acceptance,
+        )
     }
 
-    /// Returns the provenance of `UT1−UTC`, when present.
-    pub const fn ut1(self) -> Option<EarthOrientationValueKind> {
-        self.ut1
-    }
-
-    /// Returns the provenance of LOD, when present.
-    pub const fn length_of_day(self) -> Option<EarthOrientationValueKind> {
-        self.length_of_day
-    }
-
-    /// Returns the provenance of `dX/dY`, when those values are present.
-    pub const fn celestial_pole(self) -> Option<EarthOrientationValueKind> {
-        self.celestial_pole
-    }
-}
-
-/// Source uncertainties associated with a normalized EOP record.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct EarthOrientationUncertainty {
-    polar_motion_x: Option<Angle>,
-    polar_motion_y: Option<Angle>,
-    ut1_minus_utc: Option<Duration>,
-    excess_length_of_day: Option<Duration>,
-    celestial_pole_offset_x: Option<Angle>,
-    celestial_pole_offset_y: Option<Angle>,
-    polar_motion_rate_x: Option<AngularSpeed>,
-    polar_motion_rate_y: Option<AngularSpeed>,
-}
-
-impl EarthOrientationUncertainty {
-    /// Returns the nonnegative `xp` uncertainty.
-    pub const fn polar_motion_x(self) -> Option<Angle> {
-        self.polar_motion_x
-    }
-
-    /// Returns the nonnegative `yp` uncertainty.
-    pub const fn polar_motion_y(self) -> Option<Angle> {
-        self.polar_motion_y
-    }
-
-    /// Returns the nonnegative `UT1−UTC` uncertainty.
-    pub const fn ut1_minus_utc(self) -> Option<Duration> {
-        self.ut1_minus_utc
-    }
-
-    /// Returns the nonnegative LOD uncertainty.
-    pub const fn excess_length_of_day(self) -> Option<Duration> {
-        self.excess_length_of_day
-    }
-
-    /// Returns the nonnegative `dX` uncertainty.
-    pub const fn celestial_pole_offset_x(self) -> Option<Angle> {
-        self.celestial_pole_offset_x
-    }
-
-    /// Returns the nonnegative `dY` uncertainty.
-    pub const fn celestial_pole_offset_y(self) -> Option<Angle> {
-        self.celestial_pole_offset_y
-    }
-
-    /// Returns the nonnegative `xp` rate uncertainty.
-    pub const fn polar_motion_rate_x(self) -> Option<AngularSpeed> {
-        self.polar_motion_rate_x
-    }
-
-    /// Returns the nonnegative `yp` rate uncertainty.
-    pub const fn polar_motion_rate_y(self) -> Option<AngularSpeed> {
-        self.polar_motion_rate_y
+    fn ensure_field(
+        line: usize,
+        field: &'static str,
+        provenance: Option<ValueProvenance>,
+        acceptance: EarthOrientationAcceptance,
+    ) -> Result<(), Error> {
+        if let Some(provenance) = provenance {
+            if !acceptance.accepts(provenance) {
+                return Err(Error::EarthOrientationValueRejected {
+                    line,
+                    field,
+                    provenance: provenance.label(),
+                    acceptance: acceptance.label(),
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -138,8 +142,7 @@ pub struct EarthOrientationRecord {
     celestial_pole_offset_y: Option<CelestialPoleOffsetY>,
     polar_motion_rate_x: Option<AngularSpeed>,
     polar_motion_rate_y: Option<AngularSpeed>,
-    quality: EarthOrientationQuality,
-    uncertainty: EarthOrientationUncertainty,
+    provenance: RecordProvenance,
 }
 
 impl EarthOrientationRecord {
@@ -198,24 +201,19 @@ impl EarthOrientationRecord {
         self.polar_motion_rate_y
     }
 
-    /// Returns per-value-group provenance.
-    pub const fn quality(self) -> EarthOrientationQuality {
-        self.quality
-    }
-
-    /// Returns source uncertainties without synthesizing missing values.
-    pub const fn uncertainty(self) -> EarthOrientationUncertainty {
-        self.uncertainty
-    }
-
-    /// Resolves this row to a complete interpolation sample.
+    /// Resolves this row to a complete interpolation sample under an explicit
+    /// provenance-acceptance policy.
     ///
-    /// The method fails if the supplied leap-second context cannot resolve the
-    /// UTC label or if any algorithm-required field is absent.
-    pub fn try_into_sample<E>(
+    /// The method fails before conversion when any present value is less
+    /// authoritative than the selected policy allows. Missing
+    /// algorithm-required fields also fail rather than becoming zero.
+    fn try_into_sample<E>(
         self,
         time: &TimeContext<'_, E>,
+        acceptance: EarthOrientationAcceptance,
     ) -> Result<EarthOrientationSample, Error> {
+        self.provenance
+            .ensure_accepted(self.source_line, acceptance)?;
         let epoch = time.resolve(self.datetime)?;
         let epoch_tai_nanoseconds = epoch.tai_nanoseconds_since_1900();
         let mut sample = EarthOrientationSample::new(
@@ -292,31 +290,17 @@ impl EarthOrientationData {
         &self.records
     }
 
-    /// Resolves every record as a complete EOP interpolation sample.
-    ///
-    /// This is strict: one missing upstream value fails the conversion rather
-    /// than dropping the row or substituting zero.
-    pub fn try_samples<E>(
-        &self,
-        time: &TimeContext<'_, E>,
-    ) -> Result<Vec<EarthOrientationSample>, Error> {
-        self.records
-            .iter()
-            .copied()
-            .map(|record| record.try_into_sample(time))
-            .collect()
-    }
-
     /// Resolves complete samples inside an inclusive typed MJD interval.
     ///
-    /// This permits callers to intersect a long EOP product with the explicit
-    /// coverage of their leap-second model. Records inside the requested
-    /// interval remain strict: a missing value still fails conversion.
+    /// Every selected record must satisfy `acceptance`; disallowed records
+    /// fail explicitly rather than being skipped and bridged by interpolation.
+    /// Missing values remain errors even when predictions are allowed.
     pub fn try_samples_in<E>(
         &self,
         time: &TimeContext<'_, E>,
         start: ModifiedJulianDate<Utc>,
         end: ModifiedJulianDate<Utc>,
+        acceptance: EarthOrientationAcceptance,
     ) -> Result<Vec<EarthOrientationSample>, Error> {
         let start = start.as_f64_lossy();
         let end = end.as_f64_lossy();
@@ -333,7 +317,7 @@ impl EarthOrientationData {
                 let mjd = record.modified_julian_date.as_f64_lossy();
                 (start..=end).contains(&mjd)
             })
-            .map(|record| record.try_into_sample(time))
+            .map(|record| record.try_into_sample(time, acceptance))
             .collect::<Result<Vec<_>, _>>()?;
         if samples.is_empty() {
             return Err(Error::InvalidEarthOrientationData {
@@ -384,14 +368,14 @@ impl IersC04 {
         let xrt = IersText::next_f64(&mut parts, line_number, "xrt")?;
         let yrt = IersText::next_f64(&mut parts, line_number, "yrt")?;
         let lod = IersText::next_f64(&mut parts, line_number, "LOD")?;
-        let xp_error = IersText::next_f64(&mut parts, line_number, "xp error")?;
-        let yp_error = IersText::next_f64(&mut parts, line_number, "yp error")?;
-        let dut1_error = IersText::next_f64(&mut parts, line_number, "UT1−UTC error")?;
-        let dx_error = IersText::next_f64(&mut parts, line_number, "dX error")?;
-        let dy_error = IersText::next_f64(&mut parts, line_number, "dY error")?;
-        let xrt_error = IersText::next_f64(&mut parts, line_number, "xrt error")?;
-        let yrt_error = IersText::next_f64(&mut parts, line_number, "yrt error")?;
-        let lod_error = IersText::next_f64(&mut parts, line_number, "LOD error")?;
+        IersText::next_nonnegative_f64(&mut parts, line_number, "xp error")?;
+        IersText::next_nonnegative_f64(&mut parts, line_number, "yp error")?;
+        IersText::next_nonnegative_f64(&mut parts, line_number, "UT1−UTC error")?;
+        IersText::next_nonnegative_f64(&mut parts, line_number, "dX error")?;
+        IersText::next_nonnegative_f64(&mut parts, line_number, "dY error")?;
+        IersText::next_nonnegative_f64(&mut parts, line_number, "xrt error")?;
+        IersText::next_nonnegative_f64(&mut parts, line_number, "yrt error")?;
+        IersText::next_nonnegative_f64(&mut parts, line_number, "LOD error")?;
         if parts.next().is_some() {
             return Err(IersText::invalid(line_number, "C04 column count"));
         }
@@ -422,53 +406,11 @@ impl IersC04 {
             )?),
             polar_motion_rate_x: Some(polar_motion_rate_x),
             polar_motion_rate_y: Some(polar_motion_rate_y),
-            quality: EarthOrientationQuality {
-                polar_motion: Some(EarthOrientationValueKind::Final),
-                ut1: Some(EarthOrientationValueKind::Final),
-                length_of_day: Some(EarthOrientationValueKind::Final),
-                celestial_pole: Some(EarthOrientationValueKind::Final),
-            },
-            uncertainty: EarthOrientationUncertainty {
-                polar_motion_x: Some(IersText::uncertainty_angle_arcseconds(
-                    xp_error,
-                    line_number,
-                    "xp error",
-                )?),
-                polar_motion_y: Some(IersText::uncertainty_angle_arcseconds(
-                    yp_error,
-                    line_number,
-                    "yp error",
-                )?),
-                ut1_minus_utc: Some(IersText::uncertainty_duration_seconds(
-                    dut1_error,
-                    line_number,
-                    "UT1−UTC error",
-                )?),
-                excess_length_of_day: Some(IersText::uncertainty_duration_seconds(
-                    lod_error,
-                    line_number,
-                    "LOD error",
-                )?),
-                celestial_pole_offset_x: Some(IersText::uncertainty_angle_arcseconds(
-                    dx_error,
-                    line_number,
-                    "dX error",
-                )?),
-                celestial_pole_offset_y: Some(IersText::uncertainty_angle_arcseconds(
-                    dy_error,
-                    line_number,
-                    "dY error",
-                )?),
-                polar_motion_rate_x: Some(IersText::uncertainty_rate_arcseconds_per_day(
-                    xrt_error,
-                    line_number,
-                    "xrt error",
-                )?),
-                polar_motion_rate_y: Some(IersText::uncertainty_rate_arcseconds_per_day(
-                    yrt_error,
-                    line_number,
-                    "yrt error",
-                )?),
+            provenance: RecordProvenance {
+                polar_motion: Some(ValueProvenance::Final),
+                ut1: Some(ValueProvenance::Final),
+                length_of_day: Some(ValueProvenance::Final),
+                celestial_pole: Some(ValueProvenance::Final),
             },
         })
     }
@@ -511,24 +453,20 @@ impl IersFinals2000A {
         let mjd = IersText::required_f64(line, 7, 15, line_number, "MJD")?;
 
         let a_xp = IersText::optional_f64(line, 18, 27, line_number, "Bulletin A xp")?;
-        let a_xp_error = IersText::optional_f64(line, 27, 36, line_number, "Bulletin A xp error")?;
+        IersText::optional_nonnegative_f64(line, 27, 36, line_number, "Bulletin A xp error")?;
         let a_yp = IersText::optional_f64(line, 37, 46, line_number, "Bulletin A yp")?;
-        let a_yp_error = IersText::optional_f64(line, 46, 55, line_number, "Bulletin A yp error")?;
+        IersText::optional_nonnegative_f64(line, 46, 55, line_number, "Bulletin A yp error")?;
         IersText::paired(a_xp, a_yp, line_number, "Bulletin A xp/yp")?;
 
         let a_dut1 = IersText::optional_f64(line, 58, 68, line_number, "Bulletin A UT1−UTC")?;
-        let a_dut1_error =
-            IersText::optional_f64(line, 68, 78, line_number, "Bulletin A UT1−UTC error")?;
+        IersText::optional_nonnegative_f64(line, 68, 78, line_number, "Bulletin A UT1−UTC error")?;
         let a_lod = IersText::optional_f64(line, 79, 86, line_number, "Bulletin A LOD")?;
-        let a_lod_error =
-            IersText::optional_f64(line, 86, 93, line_number, "Bulletin A LOD error")?;
+        IersText::optional_nonnegative_f64(line, 86, 93, line_number, "Bulletin A LOD error")?;
 
         let a_dx = IersText::optional_f64(line, 97, 106, line_number, "Bulletin A dX")?;
-        let a_dx_error =
-            IersText::optional_f64(line, 106, 115, line_number, "Bulletin A dX error")?;
+        IersText::optional_nonnegative_f64(line, 106, 115, line_number, "Bulletin A dX error")?;
         let a_dy = IersText::optional_f64(line, 116, 125, line_number, "Bulletin A dY")?;
-        let a_dy_error =
-            IersText::optional_f64(line, 125, 134, line_number, "Bulletin A dY error")?;
+        IersText::optional_nonnegative_f64(line, 125, 134, line_number, "Bulletin A dY error")?;
         IersText::paired(a_dx, a_dy, line_number, "Bulletin A dX/dY")?;
 
         let b_xp = IersText::optional_f64(line, 134, 144, line_number, "Bulletin B xp")?;
@@ -562,59 +500,39 @@ impl IersFinals2000A {
         let ut1_a_kind = IersText::flag(line, 57, line_number, "UT1 flag")?;
         let celestial_a_kind = IersText::flag(line, 95, line_number, "nutation flag")?;
 
-        let (xp, yp, polar_motion_kind, xp_error, yp_error) = if let (Some(xp), Some(yp)) =
-            (b_xp, b_yp)
-        {
-            (
-                Some(xp),
-                Some(yp),
-                Some(EarthOrientationValueKind::Final),
-                None,
-                None,
-            )
+        let (xp, yp, polar_motion_provenance) = if let (Some(xp), Some(yp)) = (b_xp, b_yp) {
+            (Some(xp), Some(yp), Some(ValueProvenance::Final))
         } else {
             (
                 a_xp,
                 a_yp,
                 a_xp.map(|_| IersText::required_kind(pm_a_kind, line_number, "polar-motion flag"))
                     .transpose()?,
-                a_xp_error,
-                a_yp_error,
             )
         };
-        let (dut1, ut1_kind, dut1_error) = if let Some(dut1) = b_dut1 {
-            (Some(dut1), Some(EarthOrientationValueKind::Final), None)
+        let (dut1, ut1_provenance) = if let Some(dut1) = b_dut1 {
+            (Some(dut1), Some(ValueProvenance::Final))
         } else {
             (
                 a_dut1,
                 a_dut1
                     .map(|_| IersText::required_kind(ut1_a_kind, line_number, "UT1 flag"))
                     .transpose()?,
-                a_dut1_error,
             )
         };
-        let (dx, dy, celestial_kind, dx_error, dy_error) =
-            if let (Some(dx), Some(dy)) = (b_dx, b_dy) {
-                (
-                    Some(dx),
-                    Some(dy),
-                    Some(EarthOrientationValueKind::Final),
-                    None,
-                    None,
-                )
-            } else {
-                (
-                    a_dx,
-                    a_dy,
-                    a_dx.map(|_| {
-                        IersText::required_kind(celestial_a_kind, line_number, "nutation flag")
-                    })
-                    .transpose()?,
-                    a_dx_error,
-                    a_dy_error,
-                )
-            };
-        let lod_kind = a_lod
+        let (dx, dy, celestial_provenance) = if let (Some(dx), Some(dy)) = (b_dx, b_dy) {
+            (Some(dx), Some(dy), Some(ValueProvenance::Final))
+        } else {
+            (
+                a_dx,
+                a_dy,
+                a_dx.map(|_| {
+                    IersText::required_kind(celestial_a_kind, line_number, "nutation flag")
+                })
+                .transpose()?,
+            )
+        };
+        let lod_provenance = a_lod
             .map(|_| IersText::required_kind(ut1_a_kind, line_number, "UT1 flag"))
             .transpose()?;
 
@@ -640,69 +558,11 @@ impl IersFinals2000A {
                 .transpose()?,
             polar_motion_rate_x: None,
             polar_motion_rate_y: None,
-            quality: EarthOrientationQuality {
-                polar_motion: polar_motion_kind,
-                ut1: ut1_kind,
-                length_of_day: lod_kind,
-                celestial_pole: celestial_kind,
-            },
-            uncertainty: EarthOrientationUncertainty {
-                polar_motion_x: xp_error
-                    .map(|value| {
-                        IersText::uncertainty_angle_arcseconds(
-                            value,
-                            line_number,
-                            "Bulletin A xp error",
-                        )
-                    })
-                    .transpose()?,
-                polar_motion_y: yp_error
-                    .map(|value| {
-                        IersText::uncertainty_angle_arcseconds(
-                            value,
-                            line_number,
-                            "Bulletin A yp error",
-                        )
-                    })
-                    .transpose()?,
-                ut1_minus_utc: dut1_error
-                    .map(|value| {
-                        IersText::uncertainty_duration_seconds(
-                            value,
-                            line_number,
-                            "Bulletin A UT1−UTC error",
-                        )
-                    })
-                    .transpose()?,
-                excess_length_of_day: a_lod_error
-                    .map(|milliseconds| {
-                        IersText::uncertainty_duration_seconds(
-                            milliseconds / 1_000.0,
-                            line_number,
-                            "Bulletin A LOD error",
-                        )
-                    })
-                    .transpose()?,
-                celestial_pole_offset_x: dx_error
-                    .map(|milliarcseconds| {
-                        IersText::uncertainty_angle_milliarcseconds(
-                            milliarcseconds,
-                            line_number,
-                            "Bulletin A dX error",
-                        )
-                    })
-                    .transpose()?,
-                celestial_pole_offset_y: dy_error
-                    .map(|milliarcseconds| {
-                        IersText::uncertainty_angle_milliarcseconds(
-                            milliarcseconds,
-                            line_number,
-                            "Bulletin A dY error",
-                        )
-                    })
-                    .transpose()?,
-                polar_motion_rate_x: None,
-                polar_motion_rate_y: None,
+            provenance: RecordProvenance {
+                polar_motion: polar_motion_provenance,
+                ut1: ut1_provenance,
+                length_of_day: lod_provenance,
+                celestial_pole: celestial_provenance,
             },
         }))
     }
@@ -753,6 +613,15 @@ impl IersText {
             .map_err(|_| Self::invalid(line, field))
     }
 
+    fn next_nonnegative_f64(
+        parts: &mut SplitWhitespace<'_>,
+        line: usize,
+        field: &'static str,
+    ) -> Result<(), Error> {
+        let value = Self::next_f64(parts, line, field)?;
+        Self::ensure_nonnegative(value, line, field)
+    }
+
     fn field(source: &str, start: usize, end: usize) -> &str {
         source.get(start..end).unwrap_or("").trim()
     }
@@ -799,25 +668,46 @@ impl IersText {
         }
     }
 
+    fn optional_nonnegative_f64(
+        source: &str,
+        start: usize,
+        end: usize,
+        line: usize,
+        field: &'static str,
+    ) -> Result<(), Error> {
+        if let Some(value) = Self::optional_f64(source, start, end, line, field)? {
+            Self::ensure_nonnegative(value, line, field)?;
+        }
+        Ok(())
+    }
+
+    fn ensure_nonnegative(value: f64, line: usize, field: &'static str) -> Result<(), Error> {
+        if value.is_finite() && value >= 0.0 {
+            Ok(())
+        } else {
+            Err(Self::invalid(line, field))
+        }
+    }
+
     fn flag(
         source: &str,
         index: usize,
         line: usize,
         field: &'static str,
-    ) -> Result<Option<EarthOrientationValueKind>, Error> {
+    ) -> Result<Option<ValueProvenance>, Error> {
         match Self::field(source, index, index + 1) {
-            "I" => Ok(Some(EarthOrientationValueKind::Observed)),
-            "P" => Ok(Some(EarthOrientationValueKind::Predicted)),
+            "I" => Ok(Some(ValueProvenance::Observed)),
+            "P" => Ok(Some(ValueProvenance::Predicted)),
             "" => Ok(None),
             _ => Err(Self::invalid(line, field)),
         }
     }
 
     fn required_kind(
-        value: Option<EarthOrientationValueKind>,
+        value: Option<ValueProvenance>,
         line: usize,
         field: &'static str,
-    ) -> Result<EarthOrientationValueKind, Error> {
+    ) -> Result<ValueProvenance, Error> {
         value.ok_or(Self::invalid(line, field))
     }
 
@@ -867,14 +757,14 @@ impl IersText {
         value: f64,
         line: usize,
     ) -> Result<CelestialPoleOffsetX, Error> {
-        Self::celestial_offset_x_milliarcseconds(value * 1_000.0, line)
+        Self::celestial_offset_x_milliarcseconds(value * MILLIARCSECONDS_PER_ARCSECOND, line)
     }
 
     fn celestial_offset_y_arcseconds(
         value: f64,
         line: usize,
     ) -> Result<CelestialPoleOffsetY, Error> {
-        Self::celestial_offset_y_milliarcseconds(value * 1_000.0, line)
+        Self::celestial_offset_y_milliarcseconds(value * MILLIARCSECONDS_PER_ARCSECOND, line)
     }
 
     fn celestial_offset_x_milliarcseconds(
@@ -896,48 +786,9 @@ impl IersText {
         line: usize,
         field: &'static str,
     ) -> Result<AngularSpeed, Error> {
-        AngularSpeed::from_radians_per_second(value * RADIANS_PER_ARCSECOND / SECONDS_PER_DAY)
-            .map_err(|_| Self::invalid(line, field))
-    }
-
-    fn uncertainty_angle_arcseconds(
-        value: f64,
-        line: usize,
-        field: &'static str,
-    ) -> Result<Angle, Error> {
-        if value < 0.0 {
-            return Err(Self::invalid(line, field));
-        }
-        Angle::from_radians(value * RADIANS_PER_ARCSECOND).map_err(|_| Self::invalid(line, field))
-    }
-
-    fn uncertainty_angle_milliarcseconds(
-        value: f64,
-        line: usize,
-        field: &'static str,
-    ) -> Result<Angle, Error> {
-        Self::uncertainty_angle_arcseconds(value / 1_000.0, line, field)
-    }
-
-    fn uncertainty_duration_seconds(
-        value: f64,
-        line: usize,
-        field: &'static str,
-    ) -> Result<Duration, Error> {
-        if value < 0.0 {
-            return Err(Self::invalid(line, field));
-        }
-        Duration::from_seconds_f64(value).map_err(|_| Self::invalid(line, field))
-    }
-
-    fn uncertainty_rate_arcseconds_per_day(
-        value: f64,
-        line: usize,
-        field: &'static str,
-    ) -> Result<AngularSpeed, Error> {
-        if value < 0.0 {
-            return Err(Self::invalid(line, field));
-        }
-        Self::angular_speed_arcseconds_per_day(value, line, field)
+        AngularSpeed::from_radians_per_second(
+            value * RADIANS_PER_ARCSECOND / SECONDS_PER_DAY as f64,
+        )
+        .map_err(|_| Self::invalid(line, field))
     }
 }

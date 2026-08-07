@@ -99,18 +99,21 @@ hyastro-validation/  仅开发使用的 SOFA、NOVAS、CSPICE 差分 oracle
 ### 4.1 角度
 
 - `Angle` 的规范存储使用 `f64` 弧度，单位只存在于构造和读取接口，不以泛型单位扩大类型数量。
-- `Ra`、`Dec`、`Lon`、`Lat`、`HourAngle`、`Azimuth`、`Altitude` 等语义包装负责范围和规范化。
+- `RightAscension`、`Declination`、`Longitude`、`Latitude`、`HourAngle`、`Azimuth`、`Altitude` 等语义包装负责范围和规范化；`HourAngle` 的规范区间为 `[0, 2π)`，即 `[0h, 24h)`。
 - `Angle` 可表达任意有符号角；有范围约束的类型只能经验证或规范化构造。
-- 不允许隐式角度单位转换。`Angle::deg(1.0)` 与 `Angle::rad(1.0)` 必须肉眼可辨。
-- DMS/HMS 是表示对象或格式策略，不是内部计算单位。
+- 不允许隐式角度单位转换。弧度、度和角时的构造与读取方法必须肉眼可辨。
+- `DegreesMinutesSeconds` 和 `HoursMinutesSeconds` 是表示对象，不是内部计算单位，也不得复用带有闰秒语义的民用时间类型。
 
 示例接口形态：
 
 ```rust
-let ra = Ra::hours(5.0, 34.0, 31.94)?;
-let dec = Dec::deg(-5.0, 27.0, 0.7)?;
-let sep = Sky::new(ra, dec).separation(other);
-println!("{:.6} deg", sep.deg());
+let ra = RightAscension::try_from_hms(HoursMinutesSeconds::new(5, 34, 31.94)?)?;
+let dec = Declination::try_from_dms(DegreesMinutesSeconds::new(
+    SexagesimalSign::Negative,
+    5,
+    27,
+    0.7,
+)?)?;
 ```
 
 ### 4.2 时间
@@ -289,7 +292,7 @@ pub enum Error {
 - 数据对象只包含计算所需的数据和覆盖区间。
 - 解析与使用分离：解析阶段完整验证，查询热路径不重复做文件结构检查。
 - 大文件优先借用、流式读取或内存映射；不得无条件复制。
-- IERS 原始记录与计算样本分层：C04/finals2000A 解析结果必须保留产品、质量标记、不确定度和空列；只有字段完整的记录才能进入 `EarthOrientationTable`，不得用零补缺失 EOP。
+- IERS 原始记录与计算样本分层：C04/finals2000A 解析器保留空列，并在转换时按极移、UT1、LOD、天极四个域执行显式 `FinalOnly` / `ObservedOrFinal` / `IncludePredicted` 接纳策略；禁止静默跳过被拒记录或用零补缺失 EOP。源文件误差列只做结构与非负有限值验证；没有完整协方差传播契约前不进入公共模型。
 - 文本解析器属于 `std` 适配层；`no_std` 核心只借用构造完成的样本表。库不得自行下载或静默选择 EOP 数据。
 
 ### 8.2 不可信输入

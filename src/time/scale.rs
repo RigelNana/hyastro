@@ -1,5 +1,7 @@
 use core::fmt::Debug;
 
+use crate::constants::time::{GPS_MINUS_TAI_NANOSECONDS, TT_MINUS_TAI_NANOSECONDS};
+
 mod sealed {
     pub trait Sealed {}
 }
@@ -55,7 +57,7 @@ impl sealed::Sealed for Tt {}
 impl TimeScale for Tt {
     const NAME: &'static str = "TT";
     const UNIFORM_DAYS: bool = true;
-    const TAI_OFFSET_NANOSECONDS: Option<i128> = Some(32_184_000_000);
+    const TAI_OFFSET_NANOSECONDS: Option<i128> = Some(TT_MINUS_TAI_NANOSECONDS);
 }
 
 /// Barycentric Dynamical Time.
@@ -111,7 +113,7 @@ impl sealed::Sealed for Gps {}
 impl TimeScale for Gps {
     const NAME: &'static str = "GPS";
     const UNIFORM_DAYS: bool = true;
-    const TAI_OFFSET_NANOSECONDS: Option<i128> = Some(-19_000_000_000);
+    const TAI_OFFSET_NANOSECONDS: Option<i128> = Some(GPS_MINUS_TAI_NANOSECONDS);
 }
 
 /// POSIX/Unix time, which deliberately ignores leap seconds.

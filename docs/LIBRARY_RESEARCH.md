@@ -414,7 +414,7 @@ flowchart LR
 
 ### 7.5 产品侧后端状态
 
-1. **EOP 数据后端（已落地）**：`IersC04` 与 `IersFinals2000A` 解析 IERS EOP 20u24 C04 和 `finals.all (IAU2000)` 的 `xp`、`yp`、`UT1−UTC`、LOD、`dX`、`dY`、不确定度与质量标记；`EarthOrientationData` 显式筛选覆盖并转换到无分配查询表。sofars 提供后续 IAU 2006/2000A 数值内核。
+1. **EOP 数据后端（已落地）**：`IersC04` 与 `IersFinals2000A` 解析 IERS EOP 20u24 C04 和 `finals.all (IAU2000)` 的 `xp`、`yp`、`UT1−UTC`、LOD、`dX`、`dY`；原始空列保持缺失，观测/预报标记通过显式接纳策略影响样本转换。sofars 提供后续 IAU 2006/2000A 数值内核。
 2. **历表与动态参考系后端**：采用 ANISE 0.10.4 读取 JPL DE 的 BSP/SPK、BPC 并执行目标-中心状态和参考系变换；产品层负责固定内核版本、校验和、覆盖和离线加载。ANISE 未支持的 SPK 类型及 CK/SCLK/DSK/IK/EK 由独立可选适配器补充。
 3. **星表后端**：Gaia/Hipparcos/FK5 星表加载与列映射（七库均无文件读取；novas 仅内存 `make_cat_entry`）。
 4. **气象参数后端**：折射输入（气压/温度/湿度/波长），供 sofars `refco`/`atio13` 使用。
@@ -437,7 +437,7 @@ flowchart LR
 | [`celestial-eop-data 0.1.12`](https://docs.rs/celestial-eop-data/0.1.12/celestial_eop_data/) | 捆绑 C04 与 finals2000A，记录含 MJD、`xp/yp`、`UT1−UTC`、LOD、`dX/dY` | 其构建期 finals 解析器把缺失 LOD、`dX/dY` 写成 `0.0`，不可再区分“缺失”和“真实零”；运行时依赖 `std`、`zstd`、`OnceLock` 与分配；滚动数据还需额外版本/校验和策略 |
 | [`tempoch-core 0.6.5`](https://docs.rs/tempoch-core/0.6.5/tempoch_core/earth/eop/) | 完整字段，缺失值保留为 `Option`，运行时数据包 | `AGPL-3.0-only`，且引入其整套时间、数量和归档栈，不适合作为 hyastro 的小型解析依赖 |
 
-**实现结论**：已按上述边界在 `std` feature 下实现 `IersC04` 与 `IersFinals2000A` 两个窄解析器，输出 `EarthOrientationRecord` / `EarthOrientationData`；原始字段用 `Option` 保留空列，质量按极移、UT1、LOD、天极四个域保存，不把缺失值写成零。`try_samples` 对每一行执行严格完整性转换；`try_samples_in` 允许调用者先与闰秒覆盖显式求交。无分配的 `EarthOrientationTable<'a>` 仍属于 `no_std` 核心。仓库快照及 URL、SHA-256、记录数和字段覆盖边界见 `data/eop/SOURCES.toml`。
+**实现结论**：已在 `std` feature 下实现 `IersC04` 与 `IersFinals2000A` 两个窄解析器，输出 `EarthOrientationRecord` / `EarthOrientationData`；计算字段用 `Option` 保留空列，不把缺失值写成零。来源标记不再作为被动 getter 暴露，而由 `try_samples_in` 按极移、UT1、LOD、天极四域强制执行 `FinalOnly` / `ObservedOrFinal` / `IncludePredicted`；被拒记录明确报错，不能跳过后跨空洞插值。源误差列仅验证结构和非负有限值；没有完整协方差传播前不进入公共模型。无分配的 `EarthOrientationTable<'a>` 仍属于 `no_std` 核心。仓库快照及 URL、SHA-256、记录数和字段覆盖边界见 `data/eop/SOURCES.toml`。
 
 ## 8. 结论
 

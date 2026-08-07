@@ -1,5 +1,13 @@
 use core::{fmt::Debug, marker::PhantomData};
 
+use crate::constants::{
+    length::{
+        METRES_PER_ASTRONOMICAL_UNIT, METRES_PER_KILOMETRE, METRES_PER_LIGHT_SECOND,
+        METRES_PER_PARSEC,
+    },
+    time::SECONDS_PER_DAY,
+};
+
 use super::Error;
 
 mod sealed {
@@ -77,11 +85,11 @@ pub struct Length(f64);
 
 impl Length {
     /// Number of metres in one astronomical unit.
-    pub const METRES_PER_AU: f64 = 149_597_870_700.0;
+    pub const METRES_PER_AU: f64 = METRES_PER_ASTRONOMICAL_UNIT;
     /// Number of metres in one light-second.
-    pub const METRES_PER_LIGHT_SECOND: f64 = 299_792_458.0;
+    pub const METRES_PER_LIGHT_SECOND: f64 = METRES_PER_LIGHT_SECOND;
     /// Number of metres in one parsec.
-    pub const METRES_PER_PARSEC: f64 = 3.085_677_581_491_367e16;
+    pub const METRES_PER_PARSEC: f64 = METRES_PER_PARSEC;
 
     /// Constructs a length in metres.
     pub fn from_metres(value: f64) -> Result<Self, Error> {
@@ -91,7 +99,7 @@ impl Length {
     /// Constructs a length in kilometres.
     pub fn from_kilometres(value: f64) -> Result<Self, Error> {
         Error::ensure_finite("kilometres", value)?;
-        Self::from_metres(value * 1_000.0)
+        Self::from_metres(value * METRES_PER_KILOMETRE)
     }
 
     /// Constructs a length in astronomical units.
@@ -119,7 +127,7 @@ impl Length {
 
     /// Returns the length in kilometres.
     pub fn as_kilometres(self) -> f64 {
-        self.0 / 1_000.0
+        self.0 / METRES_PER_KILOMETRE
     }
 
     /// Returns the length in astronomical units.
@@ -181,13 +189,13 @@ impl Speed {
     /// Constructs a speed in kilometres per second.
     pub fn from_kilometres_per_second(value: f64) -> Result<Self, Error> {
         Error::ensure_finite("kilometres per second", value)?;
-        Self::from_metres_per_second(value * 1_000.0)
+        Self::from_metres_per_second(value * METRES_PER_KILOMETRE)
     }
 
     /// Constructs a speed in astronomical units per day.
     pub fn from_astronomical_units_per_day(value: f64) -> Result<Self, Error> {
         Error::ensure_finite("astronomical units per day", value)?;
-        Self::from_metres_per_second(value * Length::METRES_PER_AU / 86_400.0)
+        Self::from_metres_per_second(value * METRES_PER_ASTRONOMICAL_UNIT / SECONDS_PER_DAY as f64)
     }
 
     /// Returns the speed in metres per second.
@@ -197,12 +205,12 @@ impl Speed {
 
     /// Returns the speed in kilometres per second.
     pub fn as_kilometres_per_second(self) -> f64 {
-        self.0 / 1_000.0
+        self.0 / METRES_PER_KILOMETRE
     }
 
     /// Returns the speed in astronomical units per day.
     pub fn as_astronomical_units_per_day(self) -> f64 {
-        self.0 * 86_400.0 / Length::METRES_PER_AU
+        self.0 * SECONDS_PER_DAY as f64 / METRES_PER_ASTRONOMICAL_UNIT
     }
 
     /// Adds another speed while preserving the finite invariant.

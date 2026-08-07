@@ -24,6 +24,12 @@ pub enum Error {
         /// Unit used by the interval and value.
         unit: &'static str,
     },
+    /// A sexagesimal string did not match a supported syntax.
+    #[error("invalid {format} sexagesimal syntax")]
+    InvalidSexagesimalSyntax {
+        /// Expected sexagesimal representation.
+        format: &'static str,
+    },
     /// A vector required to have a direction had zero magnitude.
     #[error("a zero vector has no direction")]
     ZeroVector,
