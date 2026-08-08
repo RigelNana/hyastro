@@ -1,6 +1,9 @@
 use crate::{
-    frame::{CoordinateFrame, Frames, Gcrs, Itrs, State, StateTransform},
-    math::{Direction, Speed, Vector3},
+    frame::{
+        CoordinateFrame, EarthOrientationSolution, Frames, Gcrs, HorizontalDirection, Itrs, State,
+        StateTransform,
+    },
+    math::{Direction, Point3, Speed, Vector3},
     time::{EarthOrientationTable, Instant, TimeScale},
 };
 
@@ -85,6 +88,94 @@ impl<F: CoordinateFrame> NorthEastDown<F> {
             east: transform.apply_direction(self.east)?,
             down: transform.apply_direction(self.down)?,
         })
+    }
+}
+
+/// A fixed site's runtime topocentric frame at one physical epoch.
+///
+/// The value carries its site geometry, GCRS observer state, and local ENU
+/// axes together. It is deliberately not a static [`CoordinateFrame`] marker:
+/// two sites at the same epoch have different origins and axis orientations.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TopocentricFrame<S: TimeScale> {
+    earth: Earth,
+    geodetic_position: GeodeticPosition,
+    itrs_position: Point3<Itrs>,
+    observer_state: State<Gcrs, S>,
+    east_north_up: EastNorthUp<Gcrs>,
+}
+
+impl<S: TimeScale> TopocentricFrame<S> {
+    /// Returns the physical epoch shared by the observer state and local axes.
+    pub const fn epoch(self) -> Instant<S> {
+        self.observer_state.epoch()
+    }
+
+    /// Returns the Earth model used to construct the site.
+    pub const fn earth(self) -> Earth {
+        self.earth
+    }
+
+    /// Returns the site's geodetic position.
+    pub const fn geodetic_position(self) -> GeodeticPosition {
+        self.geodetic_position
+    }
+
+    /// Returns the site's fixed ITRS Cartesian position.
+    pub const fn itrs_position(self) -> Point3<Itrs> {
+        self.itrs_position
+    }
+
+    /// Returns the site's geocentric state expressed in GCRS.
+    pub const fn observer_state(self) -> State<Gcrs, S> {
+        self.observer_state
+    }
+
+    /// Returns the site's local ENU directions expressed in GCRS.
+    pub const fn east_north_up(self) -> EastNorthUp<Gcrs> {
+        self.east_north_up
+    }
+
+    /// Returns the site's local NED directions expressed in GCRS.
+    pub fn north_east_down(self) -> Result<NorthEastDown<Gcrs>, Error> {
+        let down = Direction::try_from_components(
+            self.east_north_up
+                .up()
+                .components()
+                .map(|component| -component),
+        )?;
+        Ok(NorthEastDown {
+            north: self.east_north_up.north(),
+            east: self.east_north_up.east(),
+            down,
+        })
+    }
+
+    /// Projects a GCRS unit direction onto the local horizontal axes.
+    pub fn horizontal_direction(
+        self,
+        direction: Direction<Gcrs>,
+    ) -> Result<HorizontalDirection, Error> {
+        HorizontalDirection::from_enu_components([
+            direction.dot(self.east_north_up.east()),
+            direction.dot(self.east_north_up.north()),
+            direction.dot(self.east_north_up.up()),
+        ])
+        .map_err(Error::from)
+    }
+
+    /// Converts a local horizontal direction back to a GCRS unit direction.
+    pub fn gcrs_direction(self, horizontal: HorizontalDirection) -> Result<Direction<Gcrs>, Error> {
+        let [east, north, up] = horizontal.enu_components();
+        let east_axis = self.east_north_up.east().components();
+        let north_axis = self.east_north_up.north().components();
+        let up_axis = self.east_north_up.up().components();
+        Direction::try_from_components([
+            east * east_axis[0] + north * north_axis[0] + up * up_axis[0],
+            east * east_axis[1] + north * north_axis[1] + up * up_axis[1],
+            east * east_axis[2] + north * north_axis[2] + up * up_axis[2],
+        ])
+        .map_err(Error::from)
     }
 }
 
@@ -186,6 +277,41 @@ impl FixedSite {
         State::new(self.itrs_position, Vector3::new(zero, zero, zero), epoch)
     }
 
+    /// Evaluates the site's complete runtime topocentric frame at an epoch.
+    ///
+    /// One coherent Earth-orientation snapshot drives both the GCRS observer
+    /// state and local axes, avoiding mismatched or repeated EOP evaluation.
+    pub fn topocentric_frame_at<S: TimeScale>(
+        &self,
+        epoch: Instant<S>,
+        frames: &Frames<'_, '_, EarthOrientationTable<'_>>,
+    ) -> Result<TopocentricFrame<S>, Error> {
+        self.topocentric_frame_from_orientation(frames.earth_orientation_at(epoch)?)
+    }
+
+    pub(crate) fn topocentric_frame_from_orientation<S: TimeScale>(
+        &self,
+        orientation: EarthOrientationSolution<S>,
+    ) -> Result<TopocentricFrame<S>, Error> {
+        let epoch = orientation.epoch();
+        let observer_state = orientation
+            .itrs_to_gcrs_state_transform()?
+            .apply_state(self.itrs_state(epoch))?;
+        let itrs_to_gcrs = orientation.gcrs_to_itrs().inverse();
+        let east_north_up = EastNorthUp {
+            east: itrs_to_gcrs.apply_direction(self.east_north_up.east())?,
+            north: itrs_to_gcrs.apply_direction(self.east_north_up.north())?,
+            up: itrs_to_gcrs.apply_direction(self.east_north_up.up())?,
+        };
+        Ok(TopocentricFrame {
+            earth: self.earth,
+            geodetic_position: self.geodetic_position,
+            itrs_position: self.itrs_position,
+            observer_state,
+            east_north_up,
+        })
+    }
+
     /// Transforms the fixed ITRS site into its GCRS position and velocity.
     ///
     /// The resulting velocity includes Earth rotation and the EOP-dependent
@@ -195,9 +321,7 @@ impl FixedSite {
         epoch: Instant<S>,
         frames: &Frames<'_, '_, EarthOrientationTable<'_>>,
     ) -> Result<State<Gcrs, S>, Error> {
-        frames
-            .transform(self.itrs_state(epoch))
-            .map_err(Error::from)
+        Ok(self.topocentric_frame_at(epoch, frames)?.observer_state())
     }
 
     /// Returns the actual local east-north-up directions expressed in GCRS.
@@ -209,8 +333,7 @@ impl FixedSite {
         epoch: Instant<S>,
         frames: &Frames<'_, '_, EarthOrientationTable<'_>>,
     ) -> Result<EastNorthUp<Gcrs>, Error> {
-        let transform = frames.at::<Itrs, Gcrs, S>(epoch)?;
-        self.east_north_up.transformed(transform)
+        Ok(self.topocentric_frame_at(epoch, frames)?.east_north_up())
     }
 
     /// Returns the actual local north-east-down directions expressed in GCRS.
@@ -222,7 +345,6 @@ impl FixedSite {
         epoch: Instant<S>,
         frames: &Frames<'_, '_, EarthOrientationTable<'_>>,
     ) -> Result<NorthEastDown<Gcrs>, Error> {
-        let transform = frames.at::<Itrs, Gcrs, S>(epoch)?;
-        self.north_east_down.transformed(transform)
+        self.topocentric_frame_at(epoch, frames)?.north_east_down()
     }
 }

@@ -1,10 +1,10 @@
 use crate::constants::time::TT_MINUS_TAI_NANOSECONDS;
 
 use super::{
-    Calendar, CivilDateTime, Date, DateTime, DeltaT, Duration, EarthOrientation,
-    EarthOrientationTable, EarthRotation, EarthRotationTable, Error, FixedUtcOffset, Gps,
-    Gregorian, Instant, JulianDate, LeapSeconds, Tai, TimeOfDay, TimeScale, Tt, Ut1, Ut1MinusUtc,
-    Utc,
+    Calendar, CivilDateTime, Date, DateTime, DeltaT, Duration, EarthAttitude, EarthAttitudeTable,
+    EarthOrientation, EarthOrientationTable, EarthRotation, EarthRotationTable, Error,
+    FixedUtcOffset, Gps, Gregorian, Instant, JulianDate, LeapSeconds, Tai, TimeOfDay, TimeScale,
+    Tt, Ut1, Ut1MinusUtc, Utc,
 };
 
 pub(crate) mod sealed {
@@ -69,6 +69,20 @@ impl<'a> TimeContext<'a, NoEarthOrientation> {
         TimeContext {
             leap_seconds: self.leap_seconds,
             earth_orientation,
+        }
+    }
+
+    /// Adds a validated Earth-attitude table to this context's type.
+    ///
+    /// This context supports observed direction rotations without requiring
+    /// length of day or the angular rates needed by state transforms.
+    pub const fn with_earth_attitude<'e>(
+        self,
+        earth_attitude: EarthAttitudeTable<'e>,
+    ) -> TimeContext<'a, EarthAttitudeTable<'e>> {
+        TimeContext {
+            leap_seconds: self.leap_seconds,
+            earth_orientation: earth_attitude,
         }
     }
 
@@ -273,6 +287,27 @@ impl<'a, 'e> TimeContext<'a, EarthRotationTable<'e>> {
     }
 }
 
+impl<'a, 'e> TimeContext<'a, EarthAttitudeTable<'e>> {
+    /// Returns the context's Earth-attitude table.
+    pub const fn earth_attitude(&self) -> EarthAttitudeTable<'e> {
+        self.earth_orientation
+    }
+
+    /// Resolves linearly interpolated Earth-attitude values at an instant.
+    pub fn earth_attitude_at<S: TimeScale>(
+        &self,
+        instant: Instant<S>,
+    ) -> Result<EarthAttitude<S>, Error> {
+        self.earth_orientation.at(instant, self.leap_seconds)
+    }
+
+    /// Resolves Delta T, `TT−UT1`, from this context's Earth-attitude data.
+    pub fn delta_t_at<S: TimeScale>(&self, instant: Instant<S>) -> Result<DeltaT<S>, Error> {
+        let attitude = self.earth_attitude_at(instant)?;
+        self.delta_t_from_ut1_minus_utc(instant, attitude.ut1_minus_utc())
+    }
+}
+
 impl<'a, 'e> TimeContext<'a, EarthOrientationTable<'e>> {
     /// Returns the context's Earth-orientation table.
     pub const fn earth_orientation(&self) -> EarthOrientationTable<'e> {
@@ -359,6 +394,20 @@ impl TimeScaleModel<Ut1> for TimeContext<'_, EarthRotationTable<'_>> {
     ) -> Result<JulianDate<Ut1>, Error> {
         let rotation = self.earth_rotation_at(instant)?;
         self.julian_date_from_ut1_offset(instant, rotation.ut1_minus_utc())
+    }
+}
+
+impl TimeScaleModel<Ut1> for TimeContext<'_, EarthAttitudeTable<'_>> {
+    fn validate_instant<From: TimeScale>(&self, instant: Instant<From>) -> Result<(), Error> {
+        self.earth_attitude_at(instant).map(|_| ())
+    }
+
+    fn julian_date_at<From: TimeScale>(
+        &self,
+        instant: Instant<From>,
+    ) -> Result<JulianDate<Ut1>, Error> {
+        let attitude = self.earth_attitude_at(instant)?;
+        self.julian_date_from_ut1_offset(instant, attitude.ut1_minus_utc())
     }
 }
 

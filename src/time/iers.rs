@@ -9,9 +9,9 @@ use crate::{
 };
 
 use super::{
-    CelestialPoleOffsetX, CelestialPoleOffsetY, DateTime, Duration, EarthOrientationSample,
-    EarthRotationSample, Error, ExcessLengthOfDay, Gregorian, ModifiedJulianDate, PolarMotionX,
-    PolarMotionY, TimeContext, Ut1MinusUtc, Utc,
+    CelestialPoleOffsetX, CelestialPoleOffsetY, DateTime, Duration, EarthAttitudeSample,
+    EarthOrientationSample, EarthRotationSample, Error, ExcessLengthOfDay, Gregorian,
+    ModifiedJulianDate, PolarMotionX, PolarMotionY, TimeContext, Ut1MinusUtc, Utc,
 };
 
 /// An IERS Earth-orientation product understood by the built-in text adapters.
@@ -96,6 +96,21 @@ impl RecordProvenance {
         Self::ensure_field(line, "polar motion xp/yp", self.polar_motion, acceptance)?;
         Self::ensure_field(line, "UT1−UTC", self.ut1, acceptance)?;
         Self::ensure_field(line, "length of day", self.length_of_day, acceptance)?;
+        Self::ensure_field(
+            line,
+            "celestial-pole offsets dX/dY",
+            self.celestial_pole,
+            acceptance,
+        )
+    }
+
+    fn ensure_attitude_accepted(
+        self,
+        line: usize,
+        acceptance: EarthOrientationAcceptance,
+    ) -> Result<(), Error> {
+        Self::ensure_field(line, "polar motion xp/yp", self.polar_motion, acceptance)?;
+        Self::ensure_field(line, "UT1−UTC", self.ut1, acceptance)?;
         Self::ensure_field(
             line,
             "celestial-pole offsets dX/dY",
@@ -224,6 +239,41 @@ impl EarthOrientationRecord {
         ))
     }
 
+    fn try_into_earth_attitude_sample<E>(
+        self,
+        time: &TimeContext<'_, E>,
+        acceptance: EarthOrientationAcceptance,
+    ) -> Result<EarthAttitudeSample, Error> {
+        self.provenance
+            .ensure_attitude_accepted(self.source_line, acceptance)?;
+        let epoch = time.resolve(self.datetime)?;
+        let epoch_tai_nanoseconds = epoch.tai_nanoseconds_since_1900();
+        Ok(EarthAttitudeSample::new(
+            epoch,
+            Self::required(self.ut1_minus_utc, "UT1−UTC", epoch_tai_nanoseconds)?,
+            Self::required(
+                self.polar_motion_x,
+                "polar motion xp",
+                epoch_tai_nanoseconds,
+            )?,
+            Self::required(
+                self.polar_motion_y,
+                "polar motion yp",
+                epoch_tai_nanoseconds,
+            )?,
+            Self::required(
+                self.celestial_pole_offset_x,
+                "celestial-pole offset dX",
+                epoch_tai_nanoseconds,
+            )?,
+            Self::required(
+                self.celestial_pole_offset_y,
+                "celestial-pole offset dY",
+                epoch_tai_nanoseconds,
+            )?,
+        ))
+    }
+
     /// Resolves this row to a complete interpolation sample under an explicit
     /// provenance-acceptance policy.
     ///
@@ -345,6 +395,42 @@ impl EarthOrientationData {
         if samples.is_empty() {
             return Err(Error::InvalidEarthOrientationData {
                 reason: "sample MJD interval contains no records",
+            });
+        }
+        Ok(samples)
+    }
+
+    /// Resolves Earth-attitude samples inside an inclusive typed MJD interval.
+    ///
+    /// `UT1−UTC`, polar motion, and celestial-pole offsets are required.
+    /// Missing length of day does not prevent observed direction rotations.
+    pub fn try_earth_attitude_samples_in<E>(
+        &self,
+        time: &TimeContext<'_, E>,
+        start: ModifiedJulianDate<Utc>,
+        end: ModifiedJulianDate<Utc>,
+        acceptance: EarthOrientationAcceptance,
+    ) -> Result<Vec<EarthAttitudeSample>, Error> {
+        let start = start.as_f64_lossy();
+        let end = end.as_f64_lossy();
+        if start > end {
+            return Err(Error::InvalidEarthOrientationData {
+                reason: "Earth-attitude MJD interval start must not follow its end",
+            });
+        }
+        let samples = self
+            .records
+            .iter()
+            .copied()
+            .filter(|record| {
+                let mjd = record.modified_julian_date.as_f64_lossy();
+                (start..=end).contains(&mjd)
+            })
+            .map(|record| record.try_into_earth_attitude_sample(time, acceptance))
+            .collect::<Result<Vec<_>, _>>()?;
+        if samples.is_empty() {
+            return Err(Error::InvalidEarthOrientationData {
+                reason: "Earth-attitude MJD interval contains no records",
             });
         }
         Ok(samples)

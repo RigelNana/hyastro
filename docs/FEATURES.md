@@ -360,10 +360,10 @@
 
 ### 9.3 局部和轨道参考系
 
-- **F-FRM-030 P0 内核** 站心 topocentric 原点。
-- **F-FRM-031 P0 内核** ENU。
-- **F-FRM-032 P1 内核** NED。
-- **F-FRM-033 P0 内核** Horizontal 方位/高度。
+- **F-FRM-030 P0 内核** `TopocentricFrame<S>` 把固定站点的 GCRS 状态、ENU 基和物理历元冻结为一个运行时站心参考架。
+- **F-FRM-031 P0 内核** `EastNorthUp<F>` 及站心方向往返。
+- **F-FRM-032 P1 内核** `NorthEastDown<F>` 及与 ENU 一致的历元变换。
+- **F-FRM-033 P0 内核** `HorizontalDirection` 使用北起东增方位/高度语义；天顶和天底的方位明确为 `None`。
 - **F-FRM-034 P0 内核** Hour-angle/declination。
 - **F-FRM-035 P1 内核** parallactic frame 和视场旋转。
 - **F-FRM-036 P1 内核** RTN/RSW 轨道局部架。
@@ -457,21 +457,23 @@
 - **F-LIGHT-005 P0 内核** 太阳引力偏折。
 - **F-LIGHT-006 P1 内核** 木星、土星、地球和多体引力偏折。
 - **F-LIGHT-007 P1 内核** Shapiro 延迟。
-- **F-LIGHT-008 P0 内核** 使用观测者相对 SSB 速度和日心距离的 SOFA 相对论周年光行差。
-- **F-LIGHT-009 P0 内核** 周日光行差。
+- **F-LIGHT-008 P0 内核** 使用观测者相对 SSB 速度和日心距离的 SOFA 相对论光行差。
+- **F-LIGHT-009 P0 内核** 固定站点路径以地球质心速度与 EOP 驱动的站点 GCRS 速度组合周日和周年光行差。
 - **F-LIGHT-010 P0 内核** 相对论速度变换。
 - **F-LIGHT-011 P1 内核** 掩蔽引力体筛选和近边缘稳定性。
 - **F-LIGHT-012 P0 工作流** 有限距离太阳系目标与无限远恒星采用不同路径。
 
+有限太阳系目标的当前落地范围：`FixedObserverAt<S>` 固定站点接收状态并复用 SOFA 星无关参数；`vacuum_observed_place` 迭代目标发射时刻并返回双历元、距离、自然视线派生的 CIRS 方向、地平方向和收敛诊断。无限远恒星路径仍未落地。
+
 ### 11.3 地球和站心修正
 
-- **F-OBSPLACE-001 P0 工作流** ICRS→GCRS。
-- **F-OBSPLACE-002 P0 工作流** GCRS→CIRS 视方向。
-- **F-OBSPLACE-003 P0 工作流** CIRS→地球自转后的地固方向。
-- **F-OBSPLACE-004 P0 工作流** 极移。
+- **F-OBSPLACE-001 P0 工作流** BCRS 自然视线→GCRS proper direction。
+- **F-OBSPLACE-002 P0 工作流** GCRS→同一接收历元的 CIRS 中间赤道方向。
+- **F-OBSPLACE-003 P0 工作流** CIRS→TIRS 地球自转方向链。
+- **F-OBSPLACE-004 P0 工作流** TIRS→ITRS 极移方向链。
 - **F-OBSPLACE-005 P0 工作流** 地心视差。
-- **F-OBSPLACE-006 P0 工作流** 站心视差。
-- **F-OBSPLACE-007 P0 工作流** 地平几何方位高度。
+- **F-OBSPLACE-006 P0 工作流** 有限目标使用“目标发射位置−站点接收质心位置”的站心视差。
+- **F-OBSPLACE-007 P0 工作流** 同一 `TopocentricFrame<S>` ENU 基上的几何方位高度。
 - **F-OBSPLACE-008 P1 工作流** 大气折射后观测方位高度。
 - **F-OBSPLACE-009 P1 工作流** 观测位置反算 CIRS/ICRS。
 - **F-OBSPLACE-010 P1 内核** parallactic angle。
@@ -509,13 +511,13 @@
 
 ### 12.2 站点和移动观测者
 
-- **F-SITE-001 P0 内核** 固定地面站标识、位置和参考架。
+- **F-SITE-001 P0 内核** `FixedSite` 保存标识、参考椭球、测地位置、ITRS 位置和局部基。
 - **F-SITE-002 P1 内核** 站点参考历元和速度。
 - **F-SITE-003 P1 数据** 架站坐标不连续和地震跳变。
-- **F-SITE-004 P0 工作流** ITRS 站点→GCRS 位置速度。
-- **F-SITE-005 P0 工作流** GCRS 站点→BCRS 状态。
-- **F-SITE-006 P0 内核** 本地 ENU/NED 基。
-- **F-SITE-007 P0 内核** 极移对站点和本地子午线的影响。
+- **F-SITE-004 P0 工作流** 完整 EOP 状态变换把固定 ITRS 站点转换为含地球自转速度的 GCRS 状态。
+- **F-SITE-005 P0 工作流** `FixedObserverAt<S>` 将站点 GCRS 状态与地球历表状态组合为 BCRS 接收位置/速度。
+- **F-SITE-006 P0 内核** 类型化 ENU/NED 基及 GCRS 历元快照。
+- **F-SITE-007 P0 内核** `TopocentricFrame<S>` 的极移、地球自转和局部子午线均来自同一次完整 EOP 求值。
 - **F-SITE-008 P1 内核** 移动观测者轨迹接口。
 - **F-SITE-009 P1 适配** 航天器历表作为观测者。
 - **F-SITE-010 P1 数据** 温度、气压、湿度和波长配置。
@@ -754,7 +756,7 @@
 可运行太阳示例：
 
 - `solar_apparent_position`：固定 UTC 时刻的太阳地心视黄经、视黄纬、日期真赤经/赤纬、距离和光行时诊断。
-- `current_solar_position`：从设备时钟取得当前时刻，读取调用者提供的最新 IERS `finals.all`，并把太阳地心视方向投影到调用者提供的 WGS84 经纬度局部地平系。库不读取系统定位权限或调用 IP 定位服务；当前结果明确不含站心周日视差、极移和大气折射。
+- `current_solar_position`：默认从设备时钟取得当前时刻，也接受调用者给出的可复现 UTC 历元；读取调用者提供的 DE BSP、IERS `finals.all` 与 WGS84 经度/纬度/椭球高，执行 `FixedSite → FixedObserverAt → VacuumObservedPlace`，输出 CIRS 赤经/赤纬、站心真空方位/高度、距离和光行时诊断。它应用站心视差、地球与站点组合光行差、IAU 2006/2000A 地球姿态和极移；明确不含大气折射、Shapiro 延迟和点质量引力偏折。完整站点状态要求目标历元的 EOP 行含 LOD；缺失值不会被当作零。
 - `solar_terms_year`：按指定公历年与固定 UTC 小时偏移输出 24 个节气及数值精化不确定度。
 
 ### 19.2 行星配置

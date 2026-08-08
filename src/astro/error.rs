@@ -22,6 +22,10 @@ pub enum Error {
     #[error(transparent)]
     Ephemeris(#[from] crate::ephem::Error),
 
+    /// A fixed-site or topocentric-frame operation failed.
+    #[error(transparent)]
+    Earth(#[from] crate::earth::Error),
+
     /// A light-time tolerance was zero or negative.
     #[error("light-time tolerance must be positive, got {nanoseconds} ns")]
     InvalidLightTimeTolerance {
@@ -65,6 +69,15 @@ pub enum Error {
         speed_metres_per_second: f64,
     },
 
+    /// A fixed observer's barycentric velocity was not physically valid.
+    #[error(
+        "fixed observer barycentric speed is {speed_metres_per_second} m/s, at or above light speed"
+    )]
+    FixedObserverAtOrAboveLightSpeed {
+        /// Rejected barycentric speed.
+        speed_metres_per_second: f64,
+    },
+
     /// Reception light-time iteration exhausted its explicit budget.
     #[error(
         "reception light time from {target} to {observer} did not converge after {iterations} iterations: residual {residual_nanoseconds} ns at emission epoch {emission_tai_nanoseconds} TAI ns"
@@ -74,6 +87,32 @@ pub enum Error {
         target: CelestialBody,
         /// Receiving observer.
         observer: CelestialBody,
+        /// Number of completed iterations.
+        iterations: u32,
+        /// Final absolute fixed-point residual.
+        residual_nanoseconds: i128,
+        /// Final attempted emission epoch as TAI nanoseconds since 1900-01-01 TAI.
+        emission_tai_nanoseconds: i128,
+    },
+
+    /// A finite target and fixed site produced a zero line of sight.
+    #[error(
+        "line of sight from the fixed site to {target} is zero at {epoch_tai_nanoseconds} TAI ns"
+    )]
+    UndefinedFixedSiteLineOfSight {
+        /// Observed target.
+        target: CelestialBody,
+        /// Evaluation epoch as TAI nanoseconds since 1900-01-01 TAI.
+        epoch_tai_nanoseconds: i128,
+    },
+
+    /// Fixed-site reception light-time iteration exhausted its budget.
+    #[error(
+        "reception light time from {target} to the fixed site did not converge after {iterations} iterations: residual {residual_nanoseconds} ns at emission epoch {emission_tai_nanoseconds} TAI ns"
+    )]
+    FixedSiteLightTimeDidNotConverge {
+        /// Observed target.
+        target: CelestialBody,
         /// Number of completed iterations.
         iterations: u32,
         /// Final absolute fixed-point residual.

@@ -1,6 +1,5 @@
 use std::{
     env,
-    f64::consts::{PI, TAU},
     ffi::OsString,
     fs,
     io::{Error, ErrorKind},
@@ -9,12 +8,10 @@ use std::{
 
 use hyastro::{
     astro::{Astrometry, ReceptionLightTimeOptions},
-    earth::{GeodeticLatitude, GeodeticLongitude},
-    ephem::{Ephemeris, KernelManifest},
-    frame::Frames,
-    math::{Altitude, Azimuth},
+    earth::{Earth, EllipsoidalHeight, GeodeticLatitude, GeodeticLongitude, GeodeticPosition},
+    ephem::{CelestialBody, Ephemeris, KernelManifest},
     time::{
-        Duration, EarthOrientationAcceptance, EarthRotationTable, Gregorian, Hifitime,
+        Duration, EarthOrientationAcceptance, EarthOrientationTable, Gregorian, Hifitime,
         IersFinals2000A, Jiff, JulianDate, ModifiedJulianDate, TimeContext, Utc,
     },
 };
@@ -24,10 +21,12 @@ struct Inputs {
     eop_path: PathBuf,
     latitude: GeodeticLatitude,
     longitude: GeodeticLongitude,
+    height: EllipsoidalHeight,
+    epoch: Option<jiff::Timestamp>,
 }
 
 impl Inputs {
-    const USAGE: &'static str = "usage: cargo run --features anise,jiff --example current_solar_position -- /path/to/de440s.bsp /path/to/finals.all LATITUDE_DEG LONGITUDE_DEG_EAST";
+    const USAGE: &'static str = "usage: cargo run --features anise,jiff --example current_solar_position -- /path/to/de440s.bsp /path/to/finals.all LATITUDE_DEG LONGITUDE_DEG_EAST ELLIPSOIDAL_HEIGHT_METRES [UTC_TIMESTAMP]";
 
     fn from_process() -> Result<Self, Error> {
         let mut arguments = env::args_os().skip(1);
@@ -43,6 +42,12 @@ impl Inputs {
             "east-positive longitude",
         )?)
         .map_err(|error| Error::new(ErrorKind::InvalidInput, error))?;
+        let height = EllipsoidalHeight::from_metres(Self::decimal(
+            Self::required(&mut arguments)?,
+            "ellipsoidal height",
+        )?)
+        .map_err(|error| Error::new(ErrorKind::InvalidInput, error))?;
+        let epoch = arguments.next().map(Self::timestamp).transpose()?;
         if arguments.next().is_some() {
             return Err(Error::new(ErrorKind::InvalidInput, Self::USAGE));
         }
@@ -51,6 +56,8 @@ impl Inputs {
             eop_path,
             latitude,
             longitude,
+            height,
+            epoch,
         })
     }
 
@@ -71,26 +78,41 @@ impl Inputs {
             )
         })
     }
+
+    fn timestamp(value: OsString) -> Result<jiff::Timestamp, Error> {
+        let value = value
+            .into_string()
+            .map_err(|_| Error::new(ErrorKind::InvalidInput, "UTC timestamp must be UTF-8"))?;
+        value.parse::<jiff::Timestamp>().map_err(|source| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                format!("invalid UTC timestamp {value:?}: {source}"),
+            )
+        })
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let inputs = Inputs::from_process()?;
 
-    // The device clock supplies the current POSIX timestamp. Jiff imports it,
-    // and Hifitime maps it to hyastro's exact physical UTC instant.
-    let unix_now = Jiff::new().import_timestamp(jiff::Timestamp::now());
+    // With no timestamp argument, the device clock supplies the current POSIX
+    // timestamp. An explicit UTC timestamp makes the complete pipeline
+    // reproducible and allows use with historical EOP products.
+    let timestamp = inputs.epoch.unwrap_or_else(jiff::Timestamp::now);
+    let unix_now = Jiff::new().import_timestamp(timestamp);
     let now = Hifitime::new().resolve_unix(unix_now);
     let base = TimeContext::builtin();
 
-    // Sidereal time needs measured/predicted UT1−UTC. Pass a recently downloaded
-    // IERS finals.all file rather than silently using a stale bundled snapshot.
+    // Fixed-site astrometry requires the complete observed Earth attitude:
+    // UT1−UTC and LOD, polar motion, and celestial-pole offsets. Pass a
+    // recently downloaded IERS finals.all instead of a bundled snapshot.
     let eop_text = fs::read_to_string(&inputs.eop_path)?;
     let eop_data = IersFinals2000A::parse(&eop_text)?;
     let current_mjd = JulianDate::<Utc>::from_instant(now, &base)?
         .to_modified()?
         .as_f64_lossy()
         .floor();
-    let samples = eop_data.try_earth_rotation_samples_in(
+    let samples = eop_data.try_samples_in(
         &base,
         ModifiedJulianDate::<Utc>::from_parts(current_mjd, 0.0)?,
         ModifiedJulianDate::<Utc>::from_parts(current_mjd + 1.0, 0.0)?,
@@ -101,39 +123,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or_else(|| Error::new(ErrorKind::InvalidData, "finals.all has no current EOP rows"))?
         .epoch()
         .checked_add(Duration::from_days(1)?)?;
-    let earth_rotation = EarthRotationTable::new(&samples, "runtime IERS finals2000A", expires)?;
-    let time = base.with_earth_rotation(earth_rotation);
+    let eop = EarthOrientationTable::new(&samples, "runtime IERS finals2000A", expires)?;
+    let time = base.with_earth_orientation(eop);
 
+    let earth = Earth::wgs84();
+    let site = earth.fixed_site(
+        "command-line site",
+        GeodeticPosition::new(inputs.longitude, inputs.latitude, inputs.height),
+    )?;
     let ephemeris = Ephemeris::load(KernelManifest::inspect([inputs.kernel_path])?)?;
     let astrometry = Astrometry::new(&time, &ephemeris);
-    let apparent =
-        astrometry.solar_apparent_ecliptic(now, ReceptionLightTimeOptions::standard())?;
-
-    // Convert the apparent direction to true equator/equinox of date. Combining
-    // its right ascension with local apparent sidereal time gives the local hour
-    // angle used by the standard equatorial-to-horizontal rotation.
-    let frames = Frames::new(&time);
-    let celestial = frames.celestial_orientation_at(now)?;
-    let gcrs = celestial.gcrs_from_true_ecliptic(apparent.coordinates())?;
-    let equatorial = celestial.true_equatorial(gcrs)?.coordinates();
-    let sidereal = frames.sidereal_time_at(now)?;
-    let local_sidereal = sidereal.local_apparent_sidereal_time(inputs.longitude.as_longitude())?;
-    let hour_angle = (local_sidereal.as_radians() - equatorial.right_ascension().as_radians() + PI)
-        .rem_euclid(TAU)
-        - PI;
-
-    let latitude = inputs.latitude.as_radians();
-    let declination = equatorial.declination().as_radians();
-    let (latitude_sine, latitude_cosine) = latitude.sin_cos();
-    let (declination_sine, declination_cosine) = declination.sin_cos();
-    let (hour_angle_sine, hour_angle_cosine) = hour_angle.sin_cos();
-    let east = -declination_cosine * hour_angle_sine;
-    let north =
-        declination_sine * latitude_cosine - declination_cosine * hour_angle_cosine * latitude_sine;
-    let up =
-        declination_sine * latitude_sine + declination_cosine * hour_angle_cosine * latitude_cosine;
-    let altitude = Altitude::try_from_radians(up.clamp(-1.0, 1.0).asin())?;
-    let azimuth = Azimuth::wrap_radians(east.atan2(north))?;
+    let observer = astrometry.fixed_observer_at(&site, now)?;
+    let observed = observer
+        .vacuum_observed_place(CelestialBody::Sun, ReceptionLightTimeOptions::standard())?;
+    let horizontal = observed.horizontal();
+    let intermediate = observed.intermediate_equatorial().coordinates();
 
     let utc = base.represent::<Gregorian, Utc>(now)?;
     let date = utc.date();
@@ -149,40 +153,60 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         clock.nanosecond(),
     );
     println!(
-        "site (WGS84)        = latitude {:+.7}°, longitude {:+.7}° east",
+        "site (WGS84)        = latitude {:+.7}°, longitude {:+.7}° east, height {:+.3} m",
         inputs.latitude.as_degrees(),
         inputs.longitude.as_degrees(),
-    );
-    println!("altitude            = {:+.7}°", altitude.as_degrees());
-    println!(
-        "azimuth             = {:.7}° east of north",
-        azimuth.as_degrees()
+        inputs.height.as_metres(),
     );
     println!(
-        "right ascension     = {:.9} h",
-        equatorial.right_ascension().as_hours()
+        "altitude            = {:+.7}°",
+        horizontal.altitude().as_degrees()
+    );
+    if let Some(azimuth) = horizontal.azimuth() {
+        println!(
+            "azimuth             = {:.7}° east of north",
+            azimuth.as_degrees()
+        );
+    } else {
+        println!("azimuth             = undefined at zenith or nadir");
+    }
+    println!(
+        "CIRS right ascension = {:.9} h",
+        intermediate.right_ascension().as_hours()
     );
     println!(
-        "declination         = {:+.9}°",
-        equatorial.declination().as_degrees()
+        "CIRS declination     = {:+.9}°",
+        intermediate.declination().as_degrees()
     );
     println!(
-        "distance            = {:.9} au",
-        apparent.distance().as_astronomical_units()
+        "distance             = {:.9} au",
+        observed.distance().as_astronomical_units()
     );
     println!(
-        "above horizon       = {}",
-        if altitude.as_radians() >= 0.0 {
+        "one-way light time   = {:.9} s ({} iterations, {} ns residual)",
+        observed.light_time().as_seconds_f64(),
+        observed.iterations(),
+        observed.light_time_residual().as_nanoseconds(),
+    );
+    println!(
+        "above horizon        = {}",
+        if horizontal.altitude().as_radians() >= 0.0 {
             "yes"
         } else {
             "no"
         }
     );
-    println!("EOP                 = {}", time.earth_rotation().version());
     println!(
-        "model               = geocentric apparent solar centre projected onto the local horizon"
+        "EOP                  = {}",
+        time.earth_orientation().version()
     );
-    println!("not applied         = station parallax, polar motion, atmospheric refraction");
+    println!("model                = topocentric vacuum observed solar centre");
+    println!(
+        "applied              = station parallax, combined observer aberration, IAU 2006/2000A Earth attitude, polar motion"
+    );
+    println!(
+        "not applied          = atmospheric refraction, Shapiro delay, point-mass light deflection"
+    );
 
     Ok(())
 }

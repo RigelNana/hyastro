@@ -11,8 +11,8 @@ use crate::{
         Speed, Vector3,
     },
     time::{
-        Duration, EarthOrientation, EarthOrientationTable, Instant, JulianDate, TimeContext,
-        TimeScale, TimeScaleModel, Tt, Ut1,
+        Duration, EarthAttitude, EarthAttitudeTable, EarthOrientation, EarthOrientationTable,
+        Instant, JulianDate, TimeContext, TimeScale, TimeScaleModel, Tt, Ut1,
     },
 };
 
@@ -334,6 +334,213 @@ impl CelestialIntermediatePole {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct EarthAttitudeRotations {
+    precession_nutation: PrecessionNutation,
+    modeled_cip: CelestialIntermediatePole,
+    cip: CelestialIntermediatePole,
+    modeled_cio_locator: Angle,
+    cio_locator: Angle,
+    tio_locator: Angle,
+    earth_rotation_angle: HourAngle,
+    greenwich_mean_sidereal_time: HourAngle,
+    greenwich_apparent_sidereal_time: HourAngle,
+    equation_of_origins: Angle,
+    equation_of_equinoxes: Angle,
+    gcrs_to_cirs: Rotation<Gcrs, Cirs>,
+    cirs_to_tirs: Rotation<Cirs, Tirs>,
+    tirs_to_itrs: Rotation<Tirs, Itrs>,
+    gcrs_to_itrs: Rotation<Gcrs, Itrs>,
+    modeled_cio_gcrs_to_tirs_matrix: Matrix3,
+    equinox_gcrs_to_tirs_matrix: Matrix3,
+}
+
+impl EarthAttitudeRotations {
+    fn at<S: TimeScale>(
+        epoch: Instant<S>,
+        terrestrial_time: JulianDate<Tt>,
+        universal_time: JulianDate<Ut1>,
+        polar_motion_x: Angle,
+        polar_motion_y: Angle,
+        celestial_pole_offset_x: Angle,
+        celestial_pole_offset_y: Angle,
+    ) -> Result<Self, Error> {
+        let precession_nutation = PrecessionNutation::at(terrestrial_time)?;
+        let sidereal_time = SiderealTimeSolution::from_dates(
+            epoch,
+            terrestrial_time,
+            universal_time,
+            precession_nutation,
+        )?;
+        let (tt_first, tt_second) = terrestrial_time.parts();
+        let bias_precession_nutation = precession_nutation.bias_precession_nutation_matrix().rows();
+        let (model_x, model_y) = sofars::pnp::bpn2xy(&bias_precession_nutation);
+        let modeled_cip = CelestialIntermediatePole::from_radians(model_x, model_y)?;
+        let observed_x = model_x + celestial_pole_offset_x.as_radians();
+        let observed_y = model_y + celestial_pole_offset_y.as_radians();
+        let cip = CelestialIntermediatePole::from_radians(observed_x, observed_y)?;
+        let modeled_cio_locator = sofars::pnp::s06(tt_first, tt_second, model_x, model_y);
+        let cio_locator = sofars::pnp::s06(tt_first, tt_second, observed_x, observed_y);
+        let tio_locator = sofars::pnp::sp00(tt_first, tt_second);
+        let earth_rotation_angle = sidereal_time.earth_rotation_angle().as_radians();
+        let greenwich_apparent_sidereal_time = sidereal_time
+            .greenwich_apparent_sidereal_time()
+            .as_radians();
+        let modeled_celestial_to_intermediate =
+            sofars::pnp::c2ixys(model_x, model_y, modeled_cio_locator);
+        let celestial_to_intermediate = sofars::pnp::c2ixys(observed_x, observed_y, cio_locator);
+        let polar_motion = sofars::pnp::pom00(
+            polar_motion_x.as_radians(),
+            polar_motion_y.as_radians(),
+            tio_locator,
+        );
+        let identity = Matrix3::identity().rows();
+        let modeled_cio_gcrs_to_tirs = sofars::pnp::c2tcio(
+            &modeled_celestial_to_intermediate,
+            earth_rotation_angle,
+            &identity,
+        );
+        let equinox_gcrs_to_tirs = sofars::pnp::c2teqx(
+            &bias_precession_nutation,
+            greenwich_apparent_sidereal_time,
+            &identity,
+        );
+        let gcrs_to_itrs_matrix = sofars::pnp::c2tcio(
+            &celestial_to_intermediate,
+            earth_rotation_angle,
+            &polar_motion,
+        );
+        let mut cirs_to_tirs_matrix = identity;
+        sofars::vm::rz(earth_rotation_angle, &mut cirs_to_tirs_matrix);
+
+        Ok(Self {
+            precession_nutation,
+            modeled_cip,
+            cip,
+            modeled_cio_locator: Angle::from_radians(modeled_cio_locator)?,
+            cio_locator: Angle::from_radians(cio_locator)?,
+            tio_locator: Angle::from_radians(tio_locator)?,
+            earth_rotation_angle: sidereal_time.earth_rotation_angle(),
+            greenwich_mean_sidereal_time: sidereal_time.greenwich_mean_sidereal_time(),
+            greenwich_apparent_sidereal_time: sidereal_time.greenwich_apparent_sidereal_time(),
+            equation_of_origins: sidereal_time.equation_of_origins(),
+            equation_of_equinoxes: sidereal_time.equation_of_equinoxes(),
+            gcrs_to_cirs: Iau2006And2000A::rotation_from_rows(celestial_to_intermediate)?,
+            cirs_to_tirs: Iau2006And2000A::rotation_from_rows(cirs_to_tirs_matrix)?,
+            tirs_to_itrs: Iau2006And2000A::rotation_from_rows(polar_motion)?,
+            gcrs_to_itrs: Iau2006And2000A::rotation_from_rows(gcrs_to_itrs_matrix)?,
+            modeled_cio_gcrs_to_tirs_matrix: Matrix3::try_from_rows(modeled_cio_gcrs_to_tirs)?,
+            equinox_gcrs_to_tirs_matrix: Matrix3::try_from_rows(equinox_gcrs_to_tirs)?,
+        })
+    }
+}
+
+/// A coherent observed Earth-attitude solution at one physical epoch.
+///
+/// The solution includes `UT1−UTC`, polar motion, and celestial-pole
+/// corrections. It supplies direction rotations but deliberately makes no
+/// claim about length of day or measured frame angular velocity.
+#[derive(Debug, Clone, Copy)]
+pub struct EarthAttitudeSolution<S: TimeScale> {
+    epoch: Instant<S>,
+    terrestrial_time: JulianDate<Tt>,
+    universal_time: JulianDate<Ut1>,
+    observations: EarthAttitude<S>,
+    rotations: EarthAttitudeRotations,
+}
+
+impl<S: TimeScale> EarthAttitudeSolution<S> {
+    pub(super) fn at(
+        epoch: Instant<S>,
+        time: &TimeContext<'_, EarthAttitudeTable<'_>>,
+    ) -> Result<Self, Error> {
+        let observations = time.earth_attitude_at(epoch)?;
+        let terrestrial_time = JulianDate::<Tt>::from_instant(epoch, time)?;
+        let universal_time = JulianDate::<Ut1>::from_instant(epoch, time)?;
+        let rotations = EarthAttitudeRotations::at(
+            epoch,
+            terrestrial_time,
+            universal_time,
+            observations.polar_motion_x().as_angle(),
+            observations.polar_motion_y().as_angle(),
+            observations.celestial_pole_offset_x().as_angle(),
+            observations.celestial_pole_offset_y().as_angle(),
+        )?;
+        Ok(Self {
+            epoch,
+            terrestrial_time,
+            universal_time,
+            observations,
+            rotations,
+        })
+    }
+
+    /// Returns the physical epoch represented by every result in this solution.
+    pub const fn epoch(self) -> Instant<S> {
+        self.epoch
+    }
+
+    /// Returns the two-part TT date used for precession and nutation.
+    pub const fn terrestrial_time(self) -> JulianDate<Tt> {
+        self.terrestrial_time
+    }
+
+    /// Returns the two-part UT1 date used for Earth rotation.
+    pub const fn universal_time(self) -> JulianDate<Ut1> {
+        self.universal_time
+    }
+
+    /// Returns the interpolated Earth-attitude observation.
+    pub const fn observations(self) -> EarthAttitude<S> {
+        self.observations
+    }
+
+    /// Returns the IAU 2006/2000A precession-nutation result.
+    pub const fn precession_nutation(self) -> PrecessionNutation {
+        self.rotations.precession_nutation
+    }
+
+    /// Returns the CIP coordinates after applying observed `dX,dY`.
+    pub const fn cip(self) -> CelestialIntermediatePole {
+        self.rotations.cip
+    }
+
+    /// Returns the observed GCRS-to-CIRS rotation.
+    pub const fn gcrs_to_cirs(self) -> FrameRotation<Gcrs, Cirs, S> {
+        FrameRotation::new(self.epoch, self.rotations.gcrs_to_cirs)
+    }
+
+    /// Returns the CIRS-to-TIRS Earth-rotation rotation.
+    pub const fn cirs_to_tirs(self) -> FrameRotation<Cirs, Tirs, S> {
+        FrameRotation::new(self.epoch, self.rotations.cirs_to_tirs)
+    }
+
+    /// Returns the observed TIRS-to-ITRS polar-motion rotation.
+    pub const fn tirs_to_itrs(self) -> FrameRotation<Tirs, Itrs, S> {
+        FrameRotation::new(self.epoch, self.rotations.tirs_to_itrs)
+    }
+
+    /// Returns the complete observed GCRS-to-ITRS direction rotation.
+    pub const fn gcrs_to_itrs(self) -> FrameRotation<Gcrs, Itrs, S> {
+        FrameRotation::new(self.epoch, self.rotations.gcrs_to_itrs)
+    }
+
+    /// Converts a GCRS direction to observed CIRS intermediate coordinates.
+    pub fn intermediate_equatorial(
+        self,
+        source: EquatorialDirection<Gcrs>,
+    ) -> Result<EquatorialDirectionAt<Cirs, S>, Error> {
+        let direction = self
+            .rotations
+            .gcrs_to_cirs
+            .apply_direction(source.to_direction()?)?;
+        Ok(EquatorialDirectionAt::new(
+            self.epoch,
+            EquatorialDirection::from_direction(direction)?,
+        ))
+    }
+}
+
 /// A coherent IAU 2006/2000A Earth-orientation solution at one physical epoch.
 ///
 /// TT drives precession and nutation, UT1 drives Earth rotation, and all EOP
@@ -371,85 +578,37 @@ impl<S: TimeScale> EarthOrientationSolution<S> {
         let observations = time.earth_orientation_at(epoch)?;
         let terrestrial_time = JulianDate::<Tt>::from_instant(epoch, time)?;
         let universal_time = JulianDate::<Ut1>::from_instant(epoch, time)?;
-        let precession_nutation = PrecessionNutation::at(terrestrial_time)?;
-        let sidereal_time = SiderealTimeSolution::from_dates(
+        let rotations = EarthAttitudeRotations::at(
             epoch,
             terrestrial_time,
             universal_time,
-            precession_nutation,
+            observations.polar_motion_x().as_angle(),
+            observations.polar_motion_y().as_angle(),
+            observations.celestial_pole_offset_x().as_angle(),
+            observations.celestial_pole_offset_y().as_angle(),
         )?;
-        let (tt_first, tt_second) = terrestrial_time.parts();
-        let bias_precession_nutation = precession_nutation.bias_precession_nutation_matrix().rows();
-        let (model_x, model_y) = sofars::pnp::bpn2xy(&bias_precession_nutation);
-        let modeled_cip = CelestialIntermediatePole::from_radians(model_x, model_y)?;
-        let observed_x = model_x
-            + observations
-                .celestial_pole_offset_x()
-                .as_angle()
-                .as_radians();
-        let observed_y = model_y
-            + observations
-                .celestial_pole_offset_y()
-                .as_angle()
-                .as_radians();
-        let cip = CelestialIntermediatePole::from_radians(observed_x, observed_y)?;
-        let modeled_cio_locator = sofars::pnp::s06(tt_first, tt_second, model_x, model_y);
-        let cio_locator = sofars::pnp::s06(tt_first, tt_second, observed_x, observed_y);
-        let tio_locator = sofars::pnp::sp00(tt_first, tt_second);
-        let earth_rotation_angle = sidereal_time.earth_rotation_angle().as_radians();
-        let greenwich_apparent_sidereal_time = sidereal_time
-            .greenwich_apparent_sidereal_time()
-            .as_radians();
-
-        let modeled_celestial_to_intermediate =
-            sofars::pnp::c2ixys(model_x, model_y, modeled_cio_locator);
-        let celestial_to_intermediate = sofars::pnp::c2ixys(observed_x, observed_y, cio_locator);
-        let polar_motion = sofars::pnp::pom00(
-            observations.polar_motion_x().as_angle().as_radians(),
-            observations.polar_motion_y().as_angle().as_radians(),
-            tio_locator,
-        );
-        let identity = Matrix3::identity().rows();
-        let modeled_cio_gcrs_to_tirs = sofars::pnp::c2tcio(
-            &modeled_celestial_to_intermediate,
-            earth_rotation_angle,
-            &identity,
-        );
-        let equinox_gcrs_to_tirs = sofars::pnp::c2teqx(
-            &bias_precession_nutation,
-            greenwich_apparent_sidereal_time,
-            &identity,
-        );
-        let gcrs_to_itrs_matrix = sofars::pnp::c2tcio(
-            &celestial_to_intermediate,
-            earth_rotation_angle,
-            &polar_motion,
-        );
-        let mut cirs_to_tirs_matrix = identity;
-        sofars::vm::rz(earth_rotation_angle, &mut cirs_to_tirs_matrix);
-
         Ok(Self {
             epoch,
             terrestrial_time,
             universal_time,
             observations,
-            precession_nutation,
-            modeled_cip,
-            cip,
-            modeled_cio_locator: Angle::from_radians(modeled_cio_locator)?,
-            cio_locator: Angle::from_radians(cio_locator)?,
-            tio_locator: Angle::from_radians(tio_locator)?,
-            earth_rotation_angle: sidereal_time.earth_rotation_angle(),
-            greenwich_mean_sidereal_time: sidereal_time.greenwich_mean_sidereal_time(),
-            greenwich_apparent_sidereal_time: sidereal_time.greenwich_apparent_sidereal_time(),
-            equation_of_origins: sidereal_time.equation_of_origins(),
-            equation_of_equinoxes: sidereal_time.equation_of_equinoxes(),
-            gcrs_to_cirs: Iau2006And2000A::rotation_from_rows(celestial_to_intermediate)?,
-            cirs_to_tirs: Iau2006And2000A::rotation_from_rows(cirs_to_tirs_matrix)?,
-            tirs_to_itrs: Iau2006And2000A::rotation_from_rows(polar_motion)?,
-            gcrs_to_itrs: Iau2006And2000A::rotation_from_rows(gcrs_to_itrs_matrix)?,
-            modeled_cio_gcrs_to_tirs_matrix: Matrix3::try_from_rows(modeled_cio_gcrs_to_tirs)?,
-            equinox_gcrs_to_tirs_matrix: Matrix3::try_from_rows(equinox_gcrs_to_tirs)?,
+            precession_nutation: rotations.precession_nutation,
+            modeled_cip: rotations.modeled_cip,
+            cip: rotations.cip,
+            modeled_cio_locator: rotations.modeled_cio_locator,
+            cio_locator: rotations.cio_locator,
+            tio_locator: rotations.tio_locator,
+            earth_rotation_angle: rotations.earth_rotation_angle,
+            greenwich_mean_sidereal_time: rotations.greenwich_mean_sidereal_time,
+            greenwich_apparent_sidereal_time: rotations.greenwich_apparent_sidereal_time,
+            equation_of_origins: rotations.equation_of_origins,
+            equation_of_equinoxes: rotations.equation_of_equinoxes,
+            gcrs_to_cirs: rotations.gcrs_to_cirs,
+            cirs_to_tirs: rotations.cirs_to_tirs,
+            tirs_to_itrs: rotations.tirs_to_itrs,
+            gcrs_to_itrs: rotations.gcrs_to_itrs,
+            modeled_cio_gcrs_to_tirs_matrix: rotations.modeled_cio_gcrs_to_tirs_matrix,
+            equinox_gcrs_to_tirs_matrix: rotations.equinox_gcrs_to_tirs_matrix,
         })
     }
 
@@ -623,6 +782,15 @@ impl<S: TimeScale> EarthOrientationSolution<S> {
         self,
     ) -> Result<StateTransform<Tirs, Itrs, S>, Error> {
         IersPolarMotion::tirs_to_itrs(self)?.state_transform(self.epoch)
+    }
+
+    pub(crate) fn itrs_to_gcrs_state_transform(
+        self,
+    ) -> Result<StateTransform<Itrs, Gcrs, S>, Error> {
+        self.gcrs_to_cirs_state_transform()?
+            .then(self.cirs_to_tirs_state_transform()?)?
+            .then(self.tirs_to_itrs_state_transform()?)?
+            .inverse()
     }
 }
 

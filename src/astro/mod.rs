@@ -1,9 +1,10 @@
-//! Geocentric astrometric correction chains and apparent solar coordinates.
+//! Geocentric and fixed-site astrometric correction chains.
 
 mod astrometry;
 mod error;
 
 pub use astrometry::{
-    Astrometry, ReceptionLightTime, ReceptionLightTimeOptions, SolarApparentEcliptic,
+    Astrometry, FixedObserverAt, ReceptionLightTime, ReceptionLightTimeOptions,
+    SolarApparentEcliptic, VacuumObservedPlace,
 };
 pub use error::Error;

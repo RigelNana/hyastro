@@ -4,8 +4,8 @@ use hyastro::{
         Earth, EllipsoidalHeight, Error as EarthError, GeodeticLatitude, GeodeticLongitude,
         GeodeticPosition, ReferenceEllipsoid,
     },
-    frame::{Frames, Itrs},
-    math::{Length, Point3},
+    frame::{Frames, HorizontalDirection, Itrs},
+    math::{Altitude, Azimuth, Length, Point3},
     time::{
         CelestialPoleOffsetX, CelestialPoleOffsetY, DateTime, EarthOrientationSample,
         EarthOrientationTable, ExcessLengthOfDay, Gregorian, PolarMotionX, PolarMotionY,
@@ -248,6 +248,49 @@ fn fixed_itrs_site_gains_gcrs_velocity_and_rotated_local_axes() {
     );
     assert_abs_diff_eq!(gcrs_enu.north().dot(gcrs_enu.up()), 0.0, epsilon = 1.0e-15);
     assert_abs_diff_eq!(gcrs_enu.up().dot(gcrs_enu.east()), 0.0, epsilon = 1.0e-15);
+
+    let topocentric = site.topocentric_frame_at(epoch, &frames).unwrap();
+    assert_eq!(topocentric.observer_state(), gcrs);
+    let local_east = topocentric
+        .horizontal_direction(topocentric.east_north_up().east())
+        .unwrap();
+    assert_abs_diff_eq!(
+        local_east.azimuth().unwrap().as_degrees(),
+        90.0,
+        epsilon = 1.0e-12
+    );
+    assert_abs_diff_eq!(local_east.altitude().as_degrees(), 0.0, epsilon = 1.0e-12);
+
+    let local_up = topocentric
+        .horizontal_direction(topocentric.east_north_up().up())
+        .unwrap();
+    assert_eq!(local_up.azimuth(), None);
+    assert_abs_diff_eq!(local_up.altitude().as_degrees(), 90.0, epsilon = 1.0e-12);
+
+    let horizontal = HorizontalDirection::new(
+        Azimuth::try_from_degrees(123.0).unwrap(),
+        Altitude::try_from_degrees(27.0).unwrap(),
+    );
+    let round_trip = topocentric
+        .horizontal_direction(topocentric.gcrs_direction(horizontal).unwrap())
+        .unwrap();
+    assert_abs_diff_eq!(
+        round_trip.azimuth().unwrap().as_degrees(),
+        123.0,
+        epsilon = 1.0e-12
+    );
+    assert_abs_diff_eq!(round_trip.altitude().as_degrees(), 27.0, epsilon = 1.0e-12);
+
+    let zenith = HorizontalDirection::zenith().unwrap();
+    let round_trip_zenith = topocentric
+        .horizontal_direction(topocentric.gcrs_direction(zenith).unwrap())
+        .unwrap();
+    assert_eq!(round_trip_zenith.azimuth(), None);
+    assert_abs_diff_eq!(
+        round_trip_zenith.zenith_distance().unwrap().as_degrees(),
+        0.0,
+        epsilon = 1.0e-12
+    );
 }
 
 #[test]

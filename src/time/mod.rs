@@ -5,6 +5,7 @@ mod civil;
 mod context;
 mod delta_t;
 mod duration;
+mod earth_attitude;
 mod earth_rotation;
 mod eop;
 mod error;
@@ -28,6 +29,7 @@ pub use civil::{DateTime, TimeOfDay};
 pub use context::{NoEarthOrientation, TimeContext, TimeScaleModel};
 pub use delta_t::DeltaT;
 pub use duration::Duration;
+pub use earth_attitude::{EarthAttitude, EarthAttitudeSample, EarthAttitudeTable};
 pub use earth_rotation::{EarthRotation, EarthRotationSample, EarthRotationTable};
 pub use eop::{
     CelestialPoleOffsetX, CelestialPoleOffsetY, EarthOrientation, EarthOrientationSample,

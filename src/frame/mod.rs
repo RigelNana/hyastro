@@ -10,6 +10,7 @@ mod error;
 #[cfg(feature = "std")]
 mod frames;
 mod galactic;
+mod horizontal;
 mod rotation;
 mod state;
 mod system;
@@ -19,8 +20,8 @@ mod transform;
 pub use celestial::CelestialOrientationSolution;
 #[cfg(feature = "std")]
 pub use earth_orientation::{
-    CelestialIntermediatePole, EarthOrientationSolution, FukushimaWilliamsAngles,
-    PrecessionNutation, SiderealTimeSolution,
+    CelestialIntermediatePole, EarthAttitudeSolution, EarthOrientationSolution,
+    FukushimaWilliamsAngles, PrecessionNutation, SiderealTimeSolution,
 };
 pub use ecliptic::{EclipticDirection, EclipticDirectionAt, EclipticLatitude, EclipticLongitude};
 pub use equatorial::{EquatorialDirection, EquatorialDirectionAt};
@@ -28,6 +29,7 @@ pub use error::Error;
 #[cfg(feature = "std")]
 pub use frames::{Frames, StateTransformModel};
 pub use galactic::{GalacticDirection, GalacticLatitude, GalacticLongitude};
+pub use horizontal::HorizontalDirection;
 pub use rotation::FrameRotation;
 pub use state::State;
 pub use system::{

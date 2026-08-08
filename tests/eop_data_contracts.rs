@@ -3,9 +3,9 @@ use hyastro::{
     frame::{Cirs, Frames, Gcrs, Itrs, State, Tirs},
     math::{Length, Longitude, Point3, Speed, Vector3},
     time::{
-        DateTime, Duration, EarthOrientationAcceptance, EarthOrientationProduct,
-        EarthOrientationTable, EarthRotationTable, Error, Gregorian, IersC04, IersFinals2000A,
-        JulianDate, ModifiedJulianDate, TimeContext, Tt, Ut1, Utc,
+        DateTime, Duration, EarthAttitudeTable, EarthOrientationAcceptance,
+        EarthOrientationProduct, EarthOrientationTable, EarthRotationTable, Error, Gregorian,
+        IersC04, IersFinals2000A, JulianDate, ModifiedJulianDate, TimeContext, Tt, Ut1, Utc,
     },
 };
 
@@ -170,6 +170,37 @@ fn finals_parser_prefers_bulletin_b_and_preserves_prediction_gaps() {
             ..
         })
     ));
+
+    let attitude_samples = data
+        .try_earth_attitude_samples_in(
+            &time,
+            incomplete_mjd,
+            incomplete_mjd,
+            EarthOrientationAcceptance::IncludePredicted,
+        )
+        .unwrap();
+    let attitude_expires = attitude_samples[0]
+        .epoch()
+        .checked_add(Duration::from_days(1).unwrap())
+        .unwrap();
+    let attitude_table = EarthAttitudeTable::new(
+        &attitude_samples,
+        "finals attitude without LOD",
+        attitude_expires,
+    )
+    .unwrap();
+    let attitude_time = time.with_earth_attitude(attitude_table);
+    let attitude = attitude_time
+        .earth_attitude_at(attitude_samples[0].epoch())
+        .unwrap();
+    assert_eq!(
+        attitude.ut1_minus_utc(),
+        attitude_samples[0].ut1_minus_utc()
+    );
+    let solution = Frames::new(&attitude_time)
+        .earth_attitude_at(attitude_samples[0].epoch())
+        .unwrap();
+    assert_eq!(solution.observations(), attitude);
 }
 
 #[test]

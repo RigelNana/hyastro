@@ -1,10 +1,11 @@
 use crate::time::{
-    EarthOrientationTable, Instant, JulianDate, TimeContext, TimeScale, TimeScaleModel, Tt, Ut1,
+    EarthAttitudeTable, EarthOrientationTable, Instant, JulianDate, TimeContext, TimeScale,
+    TimeScaleModel, Tt, Ut1,
 };
 
 use super::{
-    CelestialOrientationSolution, Cirs, CoordinateFrame, EarthOrientationSolution, Error, Gcrs,
-    Itrs, SiderealTimeSolution, State, StateTransform, Tirs,
+    CelestialOrientationSolution, Cirs, CoordinateFrame, EarthAttitudeSolution,
+    EarthOrientationSolution, Error, Gcrs, Itrs, SiderealTimeSolution, State, StateTransform, Tirs,
 };
 
 mod sealed {
@@ -69,6 +70,19 @@ impl<'context, 'leap, E> Frames<'context, 'leap, E> {
         TimeContext<'leap, E>: TimeScaleModel<Ut1>,
     {
         SiderealTimeSolution::at(epoch, self.time)
+    }
+}
+
+impl<'context, 'leap, 'eop> Frames<'context, 'leap, EarthAttitudeTable<'eop>> {
+    /// Evaluates one coherent observed Earth-attitude solution.
+    ///
+    /// The result can rotate directions through GCRS/CIRS/TIRS/ITRS without
+    /// requiring length of day or frame-rate observations.
+    pub fn earth_attitude_at<S: TimeScale>(
+        &self,
+        epoch: Instant<S>,
+    ) -> Result<EarthAttitudeSolution<S>, Error> {
+        EarthAttitudeSolution::at(epoch, self.time)
     }
 }
 
