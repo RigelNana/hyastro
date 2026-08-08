@@ -12,6 +12,7 @@ error[E0277]: the trait bound `TimeContext<'_>: TimeScaleModel<Tdb>` is not sati
             `TimeContext<'_, E>` implements `TimeScaleModel<Tt>`
             `TimeContext<'_, E>` implements `TimeScaleModel<Utc>`
             `TimeContext<'_, EarthOrientationTable<'_>>` implements `TimeScaleModel<Ut1>`
+            `TimeContext<'_, EarthRotationTable<'_>>` implements `TimeScaleModel<Ut1>`
 note: required by a bound in `hyastro::time::Instant::<S>::from_instant`
  --> src/time/instant.rs
   |

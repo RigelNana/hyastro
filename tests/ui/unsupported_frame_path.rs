@@ -1,9 +1,12 @@
 use hyastro::{
     frame::{Bcrs, Frames, Itrs},
-    time::{Instant, Tai},
+    time::{EarthOrientationTable, Instant, Tai},
 };
 
-fn unsupported(frames: &Frames<'_, '_, '_>, epoch: Instant<Tai>) {
+fn unsupported(
+    frames: &Frames<'_, '_, EarthOrientationTable<'_>>,
+    epoch: Instant<Tai>,
+) {
     let _ = frames.at::<Bcrs, Itrs, Tai>(epoch);
 }
 

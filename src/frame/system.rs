@@ -1,3 +1,4 @@
+use crate::math::PointFrame;
 use core::fmt::Debug;
 
 mod sealed {
@@ -167,7 +168,7 @@ pub trait Origin: sealed::Sealed + Copy + Clone + Debug + Eq {
 }
 
 /// A sealed marker carrying complete static coordinate-frame semantics.
-pub trait CoordinateFrame: sealed::Sealed + Copy + Clone + Debug + Eq {
+pub trait CoordinateFrame: sealed::Sealed + PointFrame + Copy + Clone + Debug + Eq {
     /// Ideal reference system underlying this frame.
     type System: ReferenceSystem;
 
@@ -181,6 +182,17 @@ pub trait CoordinateFrame: sealed::Sealed + Copy + Clone + Debug + Eq {
     fn definition() -> FrameDefinition {
         Self::DEFINITION
     }
+}
+/// A sealed marker for axes on which right ascension and declination are defined.
+pub trait EquatorialAxes: sealed::Sealed + Copy + Clone + Debug + Eq {
+    /// Conventional name of the equatorial axis definition.
+    const NAME: &'static str;
+}
+
+/// A sealed marker for axes on which ecliptic longitude and latitude are defined.
+pub trait EclipticAxes: sealed::Sealed + Copy + Clone + Debug + Eq {
+    /// Conventional name of the ecliptic axis definition.
+    const NAME: &'static str;
 }
 
 /// A coordinate frame that is itself an ideal reference system.
@@ -213,6 +225,7 @@ impl Origin for EarthCenter {
 pub struct Icrs;
 
 impl sealed::Sealed for Icrs {}
+impl PointFrame for Icrs {}
 
 impl CoordinateFrame for Icrs {
     type System = Self;
@@ -230,12 +243,16 @@ impl CoordinateFrame for Icrs {
 }
 
 impl ReferenceSystem for Icrs {}
+impl EquatorialAxes for Icrs {
+    const NAME: &'static str = "ICRS";
+}
 
 /// Barycentric Celestial Reference System coordinate frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Bcrs;
 
 impl sealed::Sealed for Bcrs {}
+impl PointFrame for Bcrs {}
 
 impl CoordinateFrame for Bcrs {
     type System = Self;
@@ -253,12 +270,16 @@ impl CoordinateFrame for Bcrs {
 }
 
 impl ReferenceSystem for Bcrs {}
+impl EquatorialAxes for Bcrs {
+    const NAME: &'static str = "BCRS";
+}
 
 /// Geocentric Celestial Reference System coordinate frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Gcrs;
 
 impl sealed::Sealed for Gcrs {}
+impl PointFrame for Gcrs {}
 
 impl CoordinateFrame for Gcrs {
     type System = Self;
@@ -276,12 +297,16 @@ impl CoordinateFrame for Gcrs {
 }
 
 impl ReferenceSystem for Gcrs {}
+impl EquatorialAxes for Gcrs {
+    const NAME: &'static str = "GCRS";
+}
 
 /// Celestial Intermediate Reference System coordinate frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Cirs;
 
 impl sealed::Sealed for Cirs {}
+impl PointFrame for Cirs {}
 
 impl CoordinateFrame for Cirs {
     type System = Self;
@@ -299,12 +324,16 @@ impl CoordinateFrame for Cirs {
 }
 
 impl ReferenceSystem for Cirs {}
+impl EquatorialAxes for Cirs {
+    const NAME: &'static str = "CIRS";
+}
 
 /// Terrestrial Intermediate Reference System coordinate frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Tirs;
 
 impl sealed::Sealed for Tirs {}
+impl PointFrame for Tirs {}
 
 impl CoordinateFrame for Tirs {
     type System = Self;
@@ -328,6 +357,7 @@ impl ReferenceSystem for Tirs {}
 pub struct Itrs;
 
 impl sealed::Sealed for Itrs {}
+impl PointFrame for Itrs {}
 
 impl CoordinateFrame for Itrs {
     type System = Self;
@@ -345,3 +375,72 @@ impl CoordinateFrame for Itrs {
 }
 
 impl ReferenceSystem for Itrs {}
+/// Mean equator and equinox of J2000.0 axes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MeanEquatorEquinoxJ2000;
+
+impl sealed::Sealed for MeanEquatorEquinoxJ2000 {}
+
+impl EquatorialAxes for MeanEquatorEquinoxJ2000 {
+    const NAME: &'static str = "mean equator and equinox of J2000.0";
+}
+
+/// Mean equator and equinox of date axes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MeanEquatorEquinoxOfDate;
+
+impl sealed::Sealed for MeanEquatorEquinoxOfDate {}
+
+impl EquatorialAxes for MeanEquatorEquinoxOfDate {
+    const NAME: &'static str = "mean equator and equinox of date";
+}
+
+/// True equator and equinox of date axes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TrueEquatorEquinoxOfDate;
+
+impl sealed::Sealed for TrueEquatorEquinoxOfDate {}
+
+impl EquatorialAxes for TrueEquatorEquinoxOfDate {
+    const NAME: &'static str = "true equator and equinox of date";
+}
+
+/// Mean ecliptic and equinox of J2000.0 axes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MeanEclipticEquinoxJ2000;
+
+impl sealed::Sealed for MeanEclipticEquinoxJ2000 {}
+
+impl EclipticAxes for MeanEclipticEquinoxJ2000 {
+    const NAME: &'static str = "mean ecliptic and equinox of J2000.0";
+}
+
+/// Mean ecliptic and equinox of date axes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MeanEclipticEquinoxOfDate;
+
+impl sealed::Sealed for MeanEclipticEquinoxOfDate {}
+
+impl EclipticAxes for MeanEclipticEquinoxOfDate {
+    const NAME: &'static str = "mean ecliptic and equinox of date";
+}
+/// Conventional true ecliptic and equinox of date axes.
+///
+/// The axes are defined by applying IAU 2006 frame bias and precession,
+/// IAU 2000A nutation, and the true obliquity $\epsilon_A+\Delta\epsilon$.
+/// This is an axes definition only: it does not imply a spatial origin or
+/// apply light-time, aberration, parallax, or light-deflection corrections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TrueEclipticEquinoxOfDate;
+
+impl sealed::Sealed for TrueEclipticEquinoxOfDate {}
+
+impl EclipticAxes for TrueEclipticEquinoxOfDate {
+    const NAME: &'static str = "true ecliptic and equinox of date";
+}
+
+/// Canonical IAU 1958 Galactic axes in the Hipparcos ICRS realization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Galactic;
+
+impl sealed::Sealed for Galactic {}

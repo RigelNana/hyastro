@@ -1,0 +1,33 @@
+error[E0277]: the trait bound `hyastro::frame::Itrs: EquatorialAxes` is not satisfied
+ --> tests/ui/equatorial_non_equatorial_axes.rs:7:13
+  |
+7 |     let _ = EquatorialDirection::<Itrs>::new(
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `EquatorialAxes` is not implemented for `hyastro::frame::Itrs`
+  |
+  = help: the following other types implement trait `EquatorialAxes`:
+            MeanEquatorEquinoxJ2000
+            MeanEquatorEquinoxOfDate
+            TrueEquatorEquinoxOfDate
+            hyastro::frame::Bcrs
+            hyastro::frame::Cirs
+            hyastro::frame::Gcrs
+            hyastro::frame::Icrs
+note: required by a bound in `EquatorialDirection`
+ --> src/frame/equatorial.rs
+  |
+  | pub struct EquatorialDirection<F: EquatorialAxes> {
+  |                                   ^^^^^^^^^^^^^^ required by this bound in `EquatorialDirection`
+
+error[E0599]: the associated function or constant `new` exists for struct `EquatorialDirection<hyastro::frame::Itrs>`, but its trait bounds were not satisfied
+ --> tests/ui/equatorial_non_equatorial_axes.rs:7:42
+  |
+7 |     let _ = EquatorialDirection::<Itrs>::new(
+  |                                          ^^^ associated function or constant cannot be called on `EquatorialDirection<hyastro::frame::Itrs>` due to unsatisfied trait bounds
+  |
+ ::: src/frame/system.rs
+  |
+  | pub struct Itrs;
+  | --------------- doesn't satisfy `hyastro::frame::Itrs: EquatorialAxes`
+  |
+  = note: the following trait bounds were not satisfied:
+          `hyastro::frame::Itrs: EquatorialAxes`

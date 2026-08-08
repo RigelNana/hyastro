@@ -257,13 +257,18 @@ impl<F> fmt::Debug for Direction<F> {
             .finish()
     }
 }
+/// A marker for coordinate tags that carry a complete spatial origin and axis definition.
+///
+/// Downstream crates may implement this trait for their own complete point frames. Hyastro's
+/// direction-only axis markers deliberately do not implement it.
+pub trait PointFrame {}
 
 /// A Cartesian point whose complete coordinate frame is encoded in its type.
-pub struct Point3<F> {
+pub struct Point3<F: PointFrame> {
     coordinates: Vector3<F, Length>,
 }
 
-impl<F> Point3<F> {
+impl<F: PointFrame> Point3<F> {
     /// Constructs a point from Cartesian coordinates.
     pub const fn new(x: Length, y: Length, z: Length) -> Self {
         Self {
@@ -296,21 +301,21 @@ impl<F> Point3<F> {
     }
 }
 
-impl<F> Copy for Point3<F> {}
+impl<F: PointFrame> Copy for Point3<F> {}
 
-impl<F> Clone for Point3<F> {
+impl<F: PointFrame> Clone for Point3<F> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<F> PartialEq for Point3<F> {
+impl<F: PointFrame> PartialEq for Point3<F> {
     fn eq(&self, other: &Self) -> bool {
         self.coordinates == other.coordinates
     }
 }
 
-impl<F> fmt::Debug for Point3<F> {
+impl<F: PointFrame> fmt::Debug for Point3<F> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_tuple("Point3")

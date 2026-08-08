@@ -1,11 +1,11 @@
 use approx::assert_abs_diff_eq;
 use hyastro::{
     frame::{Cirs, Frames, Gcrs, Itrs, State, Tirs},
-    math::{Length, Point3, Speed, Vector3},
+    math::{Length, Longitude, Point3, Speed, Vector3},
     time::{
         DateTime, Duration, EarthOrientationAcceptance, EarthOrientationProduct,
-        EarthOrientationTable, Error, Gregorian, IersC04, IersFinals2000A, JulianDate,
-        ModifiedJulianDate, TimeContext, Tt, Ut1, Utc,
+        EarthOrientationTable, EarthRotationTable, Error, Gregorian, IersC04, IersFinals2000A,
+        JulianDate, ModifiedJulianDate, TimeContext, Tt, Ut1, Utc,
     },
 };
 
@@ -173,6 +173,70 @@ fn finals_parser_prefers_bulletin_b_and_preserves_prediction_gaps() {
 }
 
 #[test]
+fn sidereal_time_uses_current_ut1_without_requiring_length_of_day() {
+    let base = TimeContext::builtin();
+    let data = IersFinals2000A::parse(FINALS_2000_A).unwrap();
+    let samples = data
+        .try_earth_rotation_samples_in(
+            &base,
+            ModifiedJulianDate::<Utc>::from_parts(61_258.0, 0.0).unwrap(),
+            ModifiedJulianDate::<Utc>::from_parts(61_259.0, 0.0).unwrap(),
+            EarthOrientationAcceptance::IncludePredicted,
+        )
+        .unwrap();
+    assert_eq!(samples.len(), 2);
+
+    let expires = base
+        .resolve(DateTime::<Gregorian, Utc>::from_components(2026, 8, 8, 0, 0, 0, 0).unwrap())
+        .unwrap();
+    let table = EarthRotationTable::new(&samples, "finals2000A current UT1", expires).unwrap();
+    let time = base.with_earth_rotation(table);
+    let epoch = base
+        .resolve(DateTime::<Gregorian, Utc>::from_components(2026, 8, 6, 12, 0, 0, 0).unwrap())
+        .unwrap();
+    let solution = Frames::new(&time).sidereal_time_at(epoch).unwrap();
+    let rotation = time.earth_rotation_at(epoch).unwrap();
+    assert_abs_diff_eq!(
+        rotation.ut1_minus_utc().as_seconds(),
+        0.010_615_35,
+        epsilon = 5.0e-10
+    );
+
+    let tt = JulianDate::<Tt>::from_instant(epoch, &time).unwrap();
+    let ut1 = JulianDate::<Ut1>::from_instant(epoch, &time).unwrap();
+    let (tt_first, tt_second) = tt.parts();
+    let (ut1_first, ut1_second) = ut1.parts();
+    assert_abs_diff_eq!(
+        solution.earth_rotation_angle().as_radians(),
+        sofars::erst::era00(ut1_first, ut1_second),
+        epsilon = 1.0e-15
+    );
+    assert_abs_diff_eq!(
+        solution.greenwich_mean_sidereal_time().as_radians(),
+        sofars::erst::gmst06(ut1_first, ut1_second, tt_first, tt_second),
+        epsilon = 1.0e-15
+    );
+    assert_abs_diff_eq!(
+        solution.greenwich_apparent_sidereal_time().as_radians(),
+        sofars::erst::gst06a(ut1_first, ut1_second, tt_first, tt_second),
+        epsilon = 1.0e-15
+    );
+
+    let longitude = Longitude::try_from_degrees(116.391).unwrap();
+    let expected_local = (solution.greenwich_apparent_sidereal_time().as_radians()
+        + longitude.as_radians())
+    .rem_euclid(core::f64::consts::TAU);
+    assert_abs_diff_eq!(
+        solution
+            .local_apparent_sidereal_time(longitude)
+            .unwrap()
+            .as_radians(),
+        expected_local,
+        epsilon = 1.0e-15
+    );
+}
+
+#[test]
 fn c04_parser_rejects_a_calendar_and_mjd_disagreement() {
     let invalid = "1962   1   1   0  37666.00   -0.012700    0.213000   0.0326338    0.000000    0.000000    0.000000    0.000000   0.0017230    0.030000    0.030000   0.0020000    0.004774    0.002000    0.000000    0.000000   0.0014000";
     assert!(matches!(
@@ -207,7 +271,7 @@ fn complete_gcrs_itrs_chain_matches_sofa_and_round_trips_state() {
     let ut1 = JulianDate::<Ut1>::from_instant(epoch, &time).unwrap();
     let (tt_first, tt_second) = tt.parts();
     let (ut1_first, ut1_second) = ut1.parts();
-    let (x, y, s) = sofars::pnp::xys06a(tt_first, tt_second);
+    let (x, y, modeled_cio_locator) = sofars::pnp::xys06a(tt_first, tt_second);
     let corrected_x = x + orientation
         .celestial_pole_offset_x()
         .as_angle()
@@ -216,7 +280,8 @@ fn complete_gcrs_itrs_chain_matches_sofa_and_round_trips_state() {
         .celestial_pole_offset_y()
         .as_angle()
         .as_radians();
-    let expected_cirs = sofars::pnp::c2ixys(corrected_x, corrected_y, s);
+    let cio_locator = sofars::pnp::s06(tt_first, tt_second, corrected_x, corrected_y);
+    let expected_cirs = sofars::pnp::c2ixys(corrected_x, corrected_y, cio_locator);
     let era = sofars::erst::era00(ut1_first, ut1_second);
     let polar_motion = sofars::pnp::pom00(
         orientation.polar_motion_x().as_angle().as_radians(),
@@ -305,7 +370,7 @@ fn complete_gcrs_itrs_chain_matches_sofa_and_round_trips_state() {
         }
     }
 
-    let uncorrected = sofars::pnp::c2ixys(x, y, s);
+    let uncorrected = sofars::pnp::c2ixys(x, y, modeled_cio_locator);
     assert!(
         (gcrs_to_cirs.rotation().matrix().element(0, 2).unwrap() - uncorrected[0][2]).abs()
             > 1.0e-13

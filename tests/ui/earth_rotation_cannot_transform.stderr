@@ -1,0 +1,5 @@
+error[E0599]: no method named `at` found for reference `&Frames<'_, '_, EarthRotationTable<'_>>` in the current scope
+  --> tests/ui/earth_rotation_cannot_transform.rs:10:20
+   |
+10 |     let _ = frames.at::<Gcrs, Itrs, Tai>(epoch);
+   |                    ^^ method not found in `&Frames<'_, '_, EarthRotationTable<'_>>`

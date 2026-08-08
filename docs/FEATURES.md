@@ -224,6 +224,8 @@
 - **F-TIME-013 P0 工作流** 转换结果保留目标时间尺度，覆盖不足返回错误。
 - **F-TIME-014 P0 工作流** 缺失闰秒/EOP/历表时返回具体错误。
 
+当前 `GeocentricTdb` 已超过 F-TIME-007 的低阶近似要求：默认 `std` 路径使用 SOFA 完整 Fairhead–Bretagnon (1990) 解析级数，返回绑定物理历元的 `TdbSolution`、双分量 `JulianDate<Tdb>` 和 `TDB−TT`。SOFA 给出的 1950–2050 年地心精度界为相对数值时间历表优于 ±3 ns；模型在区间外仍可求值但不声明该精度。F-TIME-008 的站心项及历表积分仍保持独立后续能力。
+
 ### 7.2 闰秒和偏移
 
 - **F-LEAP-001 P0 数据** 版本化闰秒表。
@@ -250,6 +252,8 @@
 - **F-EOP-012 P0 工作流** Delta T = TT−UT1。
 - **F-EOP-013 P1 适配** 古代和未来 Delta T 经验模型。
 - **F-EOP-015 P1 数据** EOP 表合并、优先级和重复日期检查。
+
+当前 `EarthRotationTable` 和完整 `EarthOrientationTable` 都通过 `TimeContext::delta_t_at` 提供 F-EOP-012。计算使用同一物理历元的插值 `UT1−UTC`、闰秒表 `TAI−UTC` 与精确 `TT−TAI = 32.184 s`；返回 `DeltaT<S>` 并在 UTC 闰秒处保持 `TT−UT1` 连续。F-EOP-013 的古代/未来经验外推尚未实现，也不会在 EOP 覆盖外静默启用。
 
 ### 7.4 GPS、Unix 与其他系统时间
 
@@ -308,6 +312,8 @@
 - **F-SID-009 P1 工作流** 指定恒星时反求近似 UT1，为事件求根提供初值。
 - **F-SID-010 P0 内核** TT 和 UT1 参数在类型上分开。
 
+当前实现由 `EarthRotationSample` / `EarthRotationTable` 提供只含 `UT1−UTC` 的数据能力，`Frames::sidereal_time_at` 返回不可变 `SiderealTimeSolution`。ERA、GMST、GAST、地方平恒星时和地方视恒星时不依赖完整 EOP；`EarthOrientationTable` 仍用于需要 LOD、极移和天极偏差的完整地球姿态与状态变换。
+
 ### 8.4 极移与完整地球链
 
 - **F-PM-001 P0 内核** `xp`、`yp` 极移矩阵。
@@ -347,7 +353,7 @@
 - **F-FRM-015 P1 内核** Supergalactic 坐标。
 - **F-FRM-016 P0 内核** J2000 平黄道坐标。
 - **F-FRM-017 P0 内核** 日期平黄道坐标。
-- **F-FRM-018 P1 内核** 日期真黄道坐标。
+- **F-FRM-018 P1 内核** 日期真黄道采用命名的 `TrueEclipticEquinoxOfDate`：以 IAU 2006 frame bias/岁差、IAU 2000A 章动和真黄赤交角 $\epsilon_A+\Delta\epsilon$ 固定黄道面与真分点；类型只表示轴和历元，不暗示空间原点或视位置修正。
 - **F-FRM-019 P0 内核** 黄道模型和历元成为类型/元数据。
 - **F-FRM-020 P1 内核** MOD、TOD、PEF 遗留地球卫星参考系。
 - **F-FRM-021 P1 内核** TEME 及其明确转换约定。
@@ -444,14 +450,14 @@
 
 ### 11.2 光传播和相对论效应
 
-- **F-LIGHT-001 P0 工作流** 单程接收光行时迭代。
+- **F-LIGHT-001 P0 工作流** BCRS 单程接收光行时迭代：固定接收时刻观测者，迭代目标发射时刻，并返回双历元、距离、方向、次数和时间残差。
 - **F-LIGHT-002 P1 工作流** 单程发射光行时。
 - **F-LIGHT-003 P1 工作流** 双程 uplink/downlink 光行时。
 - **F-LIGHT-004 P0 内核** Roemer 几何延迟。
 - **F-LIGHT-005 P0 内核** 太阳引力偏折。
 - **F-LIGHT-006 P1 内核** 木星、土星、地球和多体引力偏折。
 - **F-LIGHT-007 P1 内核** Shapiro 延迟。
-- **F-LIGHT-008 P0 内核** 周年光行差。
+- **F-LIGHT-008 P0 内核** 使用观测者相对 SSB 速度和日心距离的 SOFA 相对论周年光行差。
 - **F-LIGHT-009 P0 内核** 周日光行差。
 - **F-LIGHT-010 P0 内核** 相对论速度变换。
 - **F-LIGHT-011 P1 内核** 掩蔽引力体筛选和近边缘稳定性。
@@ -518,6 +524,8 @@
 - **F-SITE-013 P2 数据** 板块运动。
 - **F-SITE-014 P2 数据** 固体地球潮、海潮负荷、极潮、大气负荷。
 
+当前实现由 `ReferenceEllipsoid`、`Earth`、`GeodeticPosition` 和 `FixedSite` 提供 F-GEO-001/002/003/005/006/008/009/010 与 F-SITE-001/004/006/007。WGS 84、GRS 80 和自定义椭球均显式绑定；SOFA Fukushima (2006) 路径完成测地坐标与 `Point3<Itrs>` 双向转换，地心原点明确返回未定义错误。固定站点保存零 ITRS 速度及 ENU/NED 基；GCRS 状态和局部方向通过同一完整 EOP 变换求值，不把极移、LOD 或天极偏差伪造为零。站点速度/不连续事件、BCRS、移动观测者和环境数据仍由后续条目负责。
+
 ## 13. 大气折射与传播介质
 
 ### 13.1 光学折射
@@ -581,7 +589,7 @@
 - **F-ANISE-004 P0 适配** SPK 类型 1、2、3、9、13 的查询、覆盖和段优先级。
 - **F-ANISE-005 P2 适配** SPK 类型 8、12 在获得充分公开内核验证前不对外开放。
 - **F-ANISE-006 P0 适配** BPC 姿态与文本 PCK/FK/TPC 转换后的 PCA/EPA/LKA 数据加载。
-- **F-ANISE-007 P0 适配** 调用者显式提供内核和校验和；hyastro 核心禁止 ANISE 自动下载及 “latest” 数据。
+- **F-ANISE-007 P0 适配** 调用者显式提供本地内核及冻结加载顺序；不要求 SHA-256。hyastro 核心禁止 ANISE 自动下载及 “latest” 数据。
 - **F-ANISE-008 P0 适配** CK、SCLK、DSK、IK、EK 和不支持的 SPK 类型返回结构化能力错误。
 - **F-SPK-001 P0 适配** DAF 文件记录、字节序和文件标识。
 - **F-SPK-002 P0 适配** 摘要记录和名称记录。
@@ -736,7 +744,7 @@
 - **F-PHASE-006 P1 工作流** 照亮比例及盈亏方向。
 - **F-PHASE-007 P1 工作流** 回归月、朔望月和相邻月相搜索。
 - **F-SEASON-001 P1 工作流** 春分、夏至、秋分、冬至。
-- **F-SEASON-002 P1 工作流** 太阳视黄经达到任意值。
+- **F-SEASON-002 P1 工作流** 太阳地心视黄经达到任意值；视黄经采用收敛接收光行时、周年光行差和 IAU 2006 日期真黄道语义。
 - **F-SEASON-003 P1 工作流** 地球近日点和远日点。
 
 ### 19.2 行星配置

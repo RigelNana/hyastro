@@ -1,0 +1,32 @@
+error[E0277]: the trait bound `Galactic: PointFrame` is not satisfied
+ --> tests/ui/point_direction_only_axes.rs:7:13
+  |
+7 |     let _ = Point3::<Galactic>::new(
+  |             ^^^^^^^^^^^^^^^^^^ the trait `PointFrame` is not implemented for `Galactic`
+  |
+  = help: the following other types implement trait `PointFrame`:
+            hyastro::frame::Bcrs
+            hyastro::frame::Cirs
+            hyastro::frame::Gcrs
+            hyastro::frame::Icrs
+            hyastro::frame::Itrs
+            hyastro::frame::Tirs
+note: required by a bound in `Point3`
+ --> src/math/vector.rs
+  |
+  | pub struct Point3<F: PointFrame> {
+  |                      ^^^^^^^^^^ required by this bound in `Point3`
+
+error[E0599]: the associated function or constant `new` exists for struct `Point3<Galactic>`, but its trait bounds were not satisfied
+ --> tests/ui/point_direction_only_axes.rs:7:33
+  |
+7 |     let _ = Point3::<Galactic>::new(
+  |                                 ^^^ associated function or constant cannot be called on `Point3<Galactic>` due to unsatisfied trait bounds
+  |
+ ::: src/frame/system.rs
+  |
+  | pub struct Galactic;
+  | ------------------- doesn't satisfy `Galactic: PointFrame`
+  |
+  = note: the following trait bounds were not satisfied:
+          `Galactic: PointFrame`

@@ -3,7 +3,9 @@
 mod calendar;
 mod civil;
 mod context;
+mod delta_t;
 mod duration;
+mod earth_rotation;
 mod eop;
 mod error;
 #[cfg(feature = "hifitime")]
@@ -16,11 +18,15 @@ mod jiff;
 mod julian;
 mod leap;
 mod scale;
+#[cfg(feature = "std")]
+mod tdb;
 
 pub use calendar::{Calendar, Date, Gregorian, Julian, JulianDayNumber, Weekday};
 pub use civil::{DateTime, TimeOfDay};
 pub use context::{NoEarthOrientation, TimeContext, TimeScaleModel};
+pub use delta_t::DeltaT;
 pub use duration::Duration;
+pub use earth_rotation::{EarthRotation, EarthRotationSample, EarthRotationTable};
 pub use eop::{
     CelestialPoleOffsetX, CelestialPoleOffsetY, EarthOrientation, EarthOrientationSample,
     EarthOrientationTable, ExcessLengthOfDay, PolarMotionX, PolarMotionY, Ut1MinusUtc,
@@ -39,3 +45,5 @@ pub use jiff::Jiff;
 pub use julian::{BesselianEpoch, JulianDate, JulianEpoch, ModifiedJulianDate};
 pub use leap::{LeapKind, LeapSecond, LeapSeconds};
 pub use scale::{Gps, Posix, Tai, Tcb, Tcg, Tdb, TimeScale, Tt, Ut1, Utc};
+#[cfg(feature = "std")]
+pub use tdb::{GeocentricTdb, TdbSolution};

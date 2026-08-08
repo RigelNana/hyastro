@@ -1,8 +1,9 @@
 use std::hint::black_box;
 
 use criterion::Criterion;
-use hyastro::math::{
-    Angle, Declination, EquatorialDirection, Length, RightAscension, RootOptions, Rotation, Vector3,
+use hyastro::{
+    frame::{EquatorialDirection, Icrs},
+    math::{Angle, Declination, Length, RightAscension, RootOptions, Rotation, Vector3},
 };
 
 struct Inertial;
@@ -25,11 +26,11 @@ fn main() {
         bencher.iter(|| rotation.apply_vector(black_box(vector)))
     });
 
-    let left = EquatorialDirection::<Inertial>::new(
+    let left = EquatorialDirection::<Icrs>::new(
         RightAscension::try_from_degrees(12.0).unwrap(),
         Declination::try_from_degrees(-30.0).unwrap(),
     );
-    let right = EquatorialDirection::<Inertial>::new(
+    let right = EquatorialDirection::<Icrs>::new(
         RightAscension::try_from_degrees(210.0).unwrap(),
         Declination::try_from_degrees(45.0).unwrap(),
     );

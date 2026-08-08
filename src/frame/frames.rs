@@ -1,18 +1,10 @@
-use crate::{
-    constants::{
-        earth::{
-            NOMINAL_ANGULAR_SPEED_RADIANS_PER_SECOND, ROTATION_DETERMINANT_TOLERANCE,
-            ROTATION_ORTHOGONALITY_TOLERANCE,
-        },
-        time::SECONDS_PER_DAY,
-    },
-    math::{AngularSpeed, Length, Matrix3, Rotation, RotationTolerance, Speed, Vector3},
-    time::{EarthOrientationTable, Instant, TimeContext, TimeScale},
+use crate::time::{
+    EarthOrientationTable, Instant, JulianDate, TimeContext, TimeScale, TimeScaleModel, Tt, Ut1,
 };
 
 use super::{
-    Cirs, CoordinateFrame, Error, FrameRotation, Gcrs, Itrs, State, StateTransform, Tirs,
-    earth_orientation::{Iau2006A, IersPolarMotion, KinematicRotation},
+    CelestialOrientationSolution, Cirs, CoordinateFrame, EarthOrientationSolution, Error, Gcrs,
+    Itrs, SiderealTimeSolution, State, StateTransform, Tirs,
 };
 
 mod sealed {
@@ -34,21 +26,62 @@ where
     fn state_transform_at(&self, epoch: Instant<S>) -> Result<StateTransform<From, To, S>, Error>;
 }
 
-/// Typed astronomical frame transformations backed by one time context.
+/// Typed astronomical frame and Earth-rotation algorithms backed by one time context.
 #[derive(Debug, Clone, Copy)]
-pub struct Frames<'context, 'leap, 'eop> {
-    time: &'context TimeContext<'leap, EarthOrientationTable<'eop>>,
+pub struct Frames<'context, 'leap, E> {
+    time: &'context TimeContext<'leap, E>,
 }
 
-impl<'context, 'leap, 'eop> Frames<'context, 'leap, 'eop> {
-    /// Constructs frame algorithms from a time context carrying EOP data.
-    pub const fn new(time: &'context TimeContext<'leap, EarthOrientationTable<'eop>>) -> Self {
+impl<'context, 'leap, E> Frames<'context, 'leap, E> {
+    /// Constructs frame algorithms from a time context carrying model data.
+    pub const fn new(time: &'context TimeContext<'leap, E>) -> Self {
         Self { time }
     }
 
-    /// Returns the time and Earth-orientation context used by these algorithms.
-    pub const fn time_context(self) -> &'context TimeContext<'leap, EarthOrientationTable<'eop>> {
+    /// Returns the time context used by these algorithms.
+    pub const fn time_context(self) -> &'context TimeContext<'leap, E> {
         self.time
+    }
+
+    /// Evaluates IAU 2006/2000A celestial orientation at one physical epoch.
+    ///
+    /// This calculation uses TT only and requires no Earth-rotation or
+    /// Earth-orientation observations. The returned solution retains the
+    /// physical epoch, its two-part TT date, and every derived rotation.
+    pub fn celestial_orientation_at<S: TimeScale>(
+        &self,
+        epoch: Instant<S>,
+    ) -> Result<CelestialOrientationSolution<S>, Error> {
+        let terrestrial_time = JulianDate::<Tt>::from_instant(epoch, self.time)?;
+        CelestialOrientationSolution::at(epoch, terrestrial_time)
+    }
+
+    /// Evaluates ERA and Greenwich or local sidereal time at one epoch.
+    ///
+    /// The context must provide UT1. An
+    /// [`EarthRotationTable`](crate::time::EarthRotationTable) is sufficient;
+    /// a complete [`EarthOrientationTable`] also satisfies the requirement.
+    pub fn sidereal_time_at<S: TimeScale>(
+        &self,
+        epoch: Instant<S>,
+    ) -> Result<SiderealTimeSolution<S>, Error>
+    where
+        TimeContext<'leap, E>: TimeScaleModel<Ut1>,
+    {
+        SiderealTimeSolution::at(epoch, self.time)
+    }
+}
+
+impl<'context, 'leap, 'eop> Frames<'context, 'leap, EarthOrientationTable<'eop>> {
+    /// Evaluates one coherent IAU 2006/2000A Earth-orientation solution.
+    ///
+    /// TT, UT1, and every EOP value are resolved from the same physical
+    /// instant and retained in the returned snapshot.
+    pub fn earth_orientation_at<S: TimeScale>(
+        &self,
+        epoch: Instant<S>,
+    ) -> Result<EarthOrientationSolution<S>, Error> {
+        EarthOrientationSolution::at(epoch, self.time)
     }
 
     /// Computes one statically supported frame transform at an epoch.
@@ -77,9 +110,8 @@ impl<'context, 'leap, 'eop> Frames<'context, 'leap, 'eop> {
         &self,
         epoch: Instant<S>,
     ) -> Result<StateTransform<Gcrs, Cirs, S>, Error> {
-        let orientation = self.time.earth_orientation_at(epoch)?;
-        let rotation = Iau2006A::gcrs_to_cirs(epoch, self.time, orientation)?;
-        Self::earth_centered_transform(epoch, &rotation)
+        self.earth_orientation_at(epoch)?
+            .gcrs_to_cirs_state_transform()
     }
 
     fn cirs_to_gcrs<S: TimeScale>(
@@ -93,45 +125,8 @@ impl<'context, 'leap, 'eop> Frames<'context, 'leap, 'eop> {
         &self,
         epoch: Instant<S>,
     ) -> Result<StateTransform<Cirs, Tirs, S>, Error> {
-        let orientation = self.time.earth_orientation_at(epoch)?;
-        let ut1 = self.time.julian_date_from_orientation(epoch, orientation)?;
-        let (ut1_first, ut1_second) = ut1.parts();
-        let earth_rotation_angle = sofars::erst::era00(ut1_first, ut1_second);
-
-        let mut rows = [[0.0; 3]; 3];
-        sofars::vm::ir(&mut rows);
-        sofars::vm::rz(earth_rotation_angle, &mut rows);
-        let matrix = Matrix3::try_from_rows(rows)?;
-        let tolerance = RotationTolerance::new(
-            ROTATION_ORTHOGONALITY_TOLERANCE,
-            ROTATION_DETERMINANT_TOLERANCE,
-        )?;
-        let rotation = Rotation::<Cirs, Tirs>::try_from_matrix(matrix, tolerance)?;
-        let frame_rotation = FrameRotation::new(epoch, rotation);
-
-        let excess_day_seconds = orientation
-            .excess_length_of_day()
-            .as_duration()
-            .as_seconds_f64();
-        let nominal_day_seconds = SECONDS_PER_DAY as f64;
-        let angular_speed = NOMINAL_ANGULAR_SPEED_RADIANS_PER_SECOND * nominal_day_seconds
-            / (nominal_day_seconds + excess_day_seconds);
-        let zero_angular_speed = AngularSpeed::from_radians_per_second(0.0)?;
-        let negative_angular_speed = AngularSpeed::from_radians_per_second(-angular_speed)?;
-        let zero_length = Length::from_metres(0.0)?;
-        let zero_speed = Speed::from_metres_per_second(0.0)?;
-
-        Ok(StateTransform::new(
-            frame_rotation.epoch(),
-            frame_rotation.rotation(),
-            Vector3::new(
-                zero_angular_speed,
-                zero_angular_speed,
-                negative_angular_speed,
-            ),
-            Vector3::new(zero_length, zero_length, zero_length),
-            Vector3::new(zero_speed, zero_speed, zero_speed),
-        ))
+        self.earth_orientation_at(epoch)?
+            .cirs_to_tirs_state_transform()
     }
 
     fn tirs_to_cirs<S: TimeScale>(
@@ -145,9 +140,8 @@ impl<'context, 'leap, 'eop> Frames<'context, 'leap, 'eop> {
         &self,
         epoch: Instant<S>,
     ) -> Result<StateTransform<Tirs, Itrs, S>, Error> {
-        let orientation = self.time.earth_orientation_at(epoch)?;
-        let rotation = IersPolarMotion::tirs_to_itrs(epoch, self.time, orientation)?;
-        Self::earth_centered_transform(epoch, &rotation)
+        self.earth_orientation_at(epoch)?
+            .tirs_to_itrs_state_transform()
     }
 
     fn itrs_to_tirs<S: TimeScale>(
@@ -161,7 +155,10 @@ impl<'context, 'leap, 'eop> Frames<'context, 'leap, 'eop> {
         &self,
         epoch: Instant<S>,
     ) -> Result<StateTransform<Gcrs, Tirs, S>, Error> {
-        self.gcrs_to_cirs(epoch)?.then(self.cirs_to_tirs(epoch)?)
+        let solution = self.earth_orientation_at(epoch)?;
+        solution
+            .gcrs_to_cirs_state_transform()?
+            .then(solution.cirs_to_tirs_state_transform()?)
     }
 
     fn tirs_to_gcrs<S: TimeScale>(
@@ -175,7 +172,10 @@ impl<'context, 'leap, 'eop> Frames<'context, 'leap, 'eop> {
         &self,
         epoch: Instant<S>,
     ) -> Result<StateTransform<Cirs, Itrs, S>, Error> {
-        self.cirs_to_tirs(epoch)?.then(self.tirs_to_itrs(epoch)?)
+        let solution = self.earth_orientation_at(epoch)?;
+        solution
+            .cirs_to_tirs_state_transform()?
+            .then(solution.tirs_to_itrs_state_transform()?)
     }
 
     fn itrs_to_cirs<S: TimeScale>(
@@ -189,9 +189,11 @@ impl<'context, 'leap, 'eop> Frames<'context, 'leap, 'eop> {
         &self,
         epoch: Instant<S>,
     ) -> Result<StateTransform<Gcrs, Itrs, S>, Error> {
-        self.gcrs_to_cirs(epoch)?
-            .then(self.cirs_to_tirs(epoch)?)?
-            .then(self.tirs_to_itrs(epoch)?)
+        let solution = self.earth_orientation_at(epoch)?;
+        solution
+            .gcrs_to_cirs_state_transform()?
+            .then(solution.cirs_to_tirs_state_transform()?)?
+            .then(solution.tirs_to_itrs_state_transform()?)
     }
 
     fn itrs_to_gcrs<S: TimeScale>(
@@ -200,31 +202,13 @@ impl<'context, 'leap, 'eop> Frames<'context, 'leap, 'eop> {
     ) -> Result<StateTransform<Itrs, Gcrs, S>, Error> {
         self.gcrs_to_itrs(epoch)?.inverse()
     }
-
-    fn earth_centered_transform<From, To, S>(
-        epoch: Instant<S>,
-        rotation: &KinematicRotation<From, To>,
-    ) -> Result<StateTransform<From, To, S>, Error>
-    where
-        From: CoordinateFrame,
-        To: CoordinateFrame,
-        S: TimeScale,
-    {
-        let zero_length = Length::from_metres(0.0)?;
-        let zero_speed = Speed::from_metres_per_second(0.0)?;
-        Ok(StateTransform::new(
-            epoch,
-            rotation.rotation(),
-            rotation.angular_velocity(),
-            Vector3::new(zero_length, zero_length, zero_length),
-            Vector3::new(zero_speed, zero_speed, zero_speed),
-        ))
-    }
 }
 
-impl<S: TimeScale> sealed::Sealed<Gcrs, Cirs, S> for Frames<'_, '_, '_> {}
+impl<S: TimeScale> sealed::Sealed<Gcrs, Cirs, S> for Frames<'_, '_, EarthOrientationTable<'_>> {}
 
-impl<S: TimeScale> StateTransformModel<Gcrs, Cirs, S> for Frames<'_, '_, '_> {
+impl<S: TimeScale> StateTransformModel<Gcrs, Cirs, S>
+    for Frames<'_, '_, EarthOrientationTable<'_>>
+{
     fn state_transform_at(
         &self,
         epoch: Instant<S>,
@@ -233,9 +217,11 @@ impl<S: TimeScale> StateTransformModel<Gcrs, Cirs, S> for Frames<'_, '_, '_> {
     }
 }
 
-impl<S: TimeScale> sealed::Sealed<Cirs, Gcrs, S> for Frames<'_, '_, '_> {}
+impl<S: TimeScale> sealed::Sealed<Cirs, Gcrs, S> for Frames<'_, '_, EarthOrientationTable<'_>> {}
 
-impl<S: TimeScale> StateTransformModel<Cirs, Gcrs, S> for Frames<'_, '_, '_> {
+impl<S: TimeScale> StateTransformModel<Cirs, Gcrs, S>
+    for Frames<'_, '_, EarthOrientationTable<'_>>
+{
     fn state_transform_at(
         &self,
         epoch: Instant<S>,
@@ -244,9 +230,11 @@ impl<S: TimeScale> StateTransformModel<Cirs, Gcrs, S> for Frames<'_, '_, '_> {
     }
 }
 
-impl<S: TimeScale> sealed::Sealed<Cirs, Tirs, S> for Frames<'_, '_, '_> {}
+impl<S: TimeScale> sealed::Sealed<Cirs, Tirs, S> for Frames<'_, '_, EarthOrientationTable<'_>> {}
 
-impl<S: TimeScale> StateTransformModel<Cirs, Tirs, S> for Frames<'_, '_, '_> {
+impl<S: TimeScale> StateTransformModel<Cirs, Tirs, S>
+    for Frames<'_, '_, EarthOrientationTable<'_>>
+{
     fn state_transform_at(
         &self,
         epoch: Instant<S>,
@@ -255,9 +243,11 @@ impl<S: TimeScale> StateTransformModel<Cirs, Tirs, S> for Frames<'_, '_, '_> {
     }
 }
 
-impl<S: TimeScale> sealed::Sealed<Tirs, Cirs, S> for Frames<'_, '_, '_> {}
+impl<S: TimeScale> sealed::Sealed<Tirs, Cirs, S> for Frames<'_, '_, EarthOrientationTable<'_>> {}
 
-impl<S: TimeScale> StateTransformModel<Tirs, Cirs, S> for Frames<'_, '_, '_> {
+impl<S: TimeScale> StateTransformModel<Tirs, Cirs, S>
+    for Frames<'_, '_, EarthOrientationTable<'_>>
+{
     fn state_transform_at(
         &self,
         epoch: Instant<S>,
@@ -266,9 +256,11 @@ impl<S: TimeScale> StateTransformModel<Tirs, Cirs, S> for Frames<'_, '_, '_> {
     }
 }
 
-impl<S: TimeScale> sealed::Sealed<Tirs, Itrs, S> for Frames<'_, '_, '_> {}
+impl<S: TimeScale> sealed::Sealed<Tirs, Itrs, S> for Frames<'_, '_, EarthOrientationTable<'_>> {}
 
-impl<S: TimeScale> StateTransformModel<Tirs, Itrs, S> for Frames<'_, '_, '_> {
+impl<S: TimeScale> StateTransformModel<Tirs, Itrs, S>
+    for Frames<'_, '_, EarthOrientationTable<'_>>
+{
     fn state_transform_at(
         &self,
         epoch: Instant<S>,
@@ -277,9 +269,11 @@ impl<S: TimeScale> StateTransformModel<Tirs, Itrs, S> for Frames<'_, '_, '_> {
     }
 }
 
-impl<S: TimeScale> sealed::Sealed<Itrs, Tirs, S> for Frames<'_, '_, '_> {}
+impl<S: TimeScale> sealed::Sealed<Itrs, Tirs, S> for Frames<'_, '_, EarthOrientationTable<'_>> {}
 
-impl<S: TimeScale> StateTransformModel<Itrs, Tirs, S> for Frames<'_, '_, '_> {
+impl<S: TimeScale> StateTransformModel<Itrs, Tirs, S>
+    for Frames<'_, '_, EarthOrientationTable<'_>>
+{
     fn state_transform_at(
         &self,
         epoch: Instant<S>,
@@ -288,9 +282,11 @@ impl<S: TimeScale> StateTransformModel<Itrs, Tirs, S> for Frames<'_, '_, '_> {
     }
 }
 
-impl<S: TimeScale> sealed::Sealed<Gcrs, Tirs, S> for Frames<'_, '_, '_> {}
+impl<S: TimeScale> sealed::Sealed<Gcrs, Tirs, S> for Frames<'_, '_, EarthOrientationTable<'_>> {}
 
-impl<S: TimeScale> StateTransformModel<Gcrs, Tirs, S> for Frames<'_, '_, '_> {
+impl<S: TimeScale> StateTransformModel<Gcrs, Tirs, S>
+    for Frames<'_, '_, EarthOrientationTable<'_>>
+{
     fn state_transform_at(
         &self,
         epoch: Instant<S>,
@@ -299,9 +295,11 @@ impl<S: TimeScale> StateTransformModel<Gcrs, Tirs, S> for Frames<'_, '_, '_> {
     }
 }
 
-impl<S: TimeScale> sealed::Sealed<Tirs, Gcrs, S> for Frames<'_, '_, '_> {}
+impl<S: TimeScale> sealed::Sealed<Tirs, Gcrs, S> for Frames<'_, '_, EarthOrientationTable<'_>> {}
 
-impl<S: TimeScale> StateTransformModel<Tirs, Gcrs, S> for Frames<'_, '_, '_> {
+impl<S: TimeScale> StateTransformModel<Tirs, Gcrs, S>
+    for Frames<'_, '_, EarthOrientationTable<'_>>
+{
     fn state_transform_at(
         &self,
         epoch: Instant<S>,
@@ -310,9 +308,11 @@ impl<S: TimeScale> StateTransformModel<Tirs, Gcrs, S> for Frames<'_, '_, '_> {
     }
 }
 
-impl<S: TimeScale> sealed::Sealed<Cirs, Itrs, S> for Frames<'_, '_, '_> {}
+impl<S: TimeScale> sealed::Sealed<Cirs, Itrs, S> for Frames<'_, '_, EarthOrientationTable<'_>> {}
 
-impl<S: TimeScale> StateTransformModel<Cirs, Itrs, S> for Frames<'_, '_, '_> {
+impl<S: TimeScale> StateTransformModel<Cirs, Itrs, S>
+    for Frames<'_, '_, EarthOrientationTable<'_>>
+{
     fn state_transform_at(
         &self,
         epoch: Instant<S>,
@@ -321,9 +321,11 @@ impl<S: TimeScale> StateTransformModel<Cirs, Itrs, S> for Frames<'_, '_, '_> {
     }
 }
 
-impl<S: TimeScale> sealed::Sealed<Itrs, Cirs, S> for Frames<'_, '_, '_> {}
+impl<S: TimeScale> sealed::Sealed<Itrs, Cirs, S> for Frames<'_, '_, EarthOrientationTable<'_>> {}
 
-impl<S: TimeScale> StateTransformModel<Itrs, Cirs, S> for Frames<'_, '_, '_> {
+impl<S: TimeScale> StateTransformModel<Itrs, Cirs, S>
+    for Frames<'_, '_, EarthOrientationTable<'_>>
+{
     fn state_transform_at(
         &self,
         epoch: Instant<S>,
@@ -332,9 +334,11 @@ impl<S: TimeScale> StateTransformModel<Itrs, Cirs, S> for Frames<'_, '_, '_> {
     }
 }
 
-impl<S: TimeScale> sealed::Sealed<Gcrs, Itrs, S> for Frames<'_, '_, '_> {}
+impl<S: TimeScale> sealed::Sealed<Gcrs, Itrs, S> for Frames<'_, '_, EarthOrientationTable<'_>> {}
 
-impl<S: TimeScale> StateTransformModel<Gcrs, Itrs, S> for Frames<'_, '_, '_> {
+impl<S: TimeScale> StateTransformModel<Gcrs, Itrs, S>
+    for Frames<'_, '_, EarthOrientationTable<'_>>
+{
     fn state_transform_at(
         &self,
         epoch: Instant<S>,
@@ -343,9 +347,11 @@ impl<S: TimeScale> StateTransformModel<Gcrs, Itrs, S> for Frames<'_, '_, '_> {
     }
 }
 
-impl<S: TimeScale> sealed::Sealed<Itrs, Gcrs, S> for Frames<'_, '_, '_> {}
+impl<S: TimeScale> sealed::Sealed<Itrs, Gcrs, S> for Frames<'_, '_, EarthOrientationTable<'_>> {}
 
-impl<S: TimeScale> StateTransformModel<Itrs, Gcrs, S> for Frames<'_, '_, '_> {
+impl<S: TimeScale> StateTransformModel<Itrs, Gcrs, S>
+    for Frames<'_, '_, EarthOrientationTable<'_>>
+{
     fn state_transform_at(
         &self,
         epoch: Instant<S>,

@@ -18,6 +18,9 @@ impl Angle {
     pub fn from_radians(value: f64) -> Result<Self, Error> {
         Error::ensure_finite("angle", value).map(Self)
     }
+    pub(crate) const fn from_finite(value: f64) -> Self {
+        Self(value)
+    }
 
     /// Constructs an angle in degrees.
     pub fn from_degrees(value: f64) -> Result<Self, Error> {

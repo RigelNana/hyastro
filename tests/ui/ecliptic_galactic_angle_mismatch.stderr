@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+ --> tests/ui/ecliptic_galactic_angle_mismatch.rs:7:9
+  |
+6 |     let _ = EclipticDirection::<MeanEclipticEquinoxJ2000>::new(
+  |             -------------------------------------------------- arguments to this function are incorrect
+7 |         GalacticLongitude::try_from_degrees(120.0).unwrap(),
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `EclipticLongitude`, found `GalacticLongitude`
+  |
+note: associated function defined here
+ --> src/frame/ecliptic.rs
+  |
+  |     pub const fn new(longitude: EclipticLongitude, latitude: EclipticLatitude) -> Self {
+  |                  ^^^

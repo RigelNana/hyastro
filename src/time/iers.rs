@@ -9,9 +9,9 @@ use crate::{
 };
 
 use super::{
-    CelestialPoleOffsetX, CelestialPoleOffsetY, DateTime, Duration, EarthOrientationSample, Error,
-    ExcessLengthOfDay, Gregorian, ModifiedJulianDate, PolarMotionX, PolarMotionY, TimeContext,
-    Ut1MinusUtc, Utc,
+    CelestialPoleOffsetX, CelestialPoleOffsetY, DateTime, Duration, EarthOrientationSample,
+    EarthRotationSample, Error, ExcessLengthOfDay, Gregorian, ModifiedJulianDate, PolarMotionX,
+    PolarMotionY, TimeContext, Ut1MinusUtc, Utc,
 };
 
 /// An IERS Earth-orientation product understood by the built-in text adapters.
@@ -104,21 +104,29 @@ impl RecordProvenance {
         )
     }
 
+    fn ensure_ut1_accepted(
+        self,
+        line: usize,
+        acceptance: EarthOrientationAcceptance,
+    ) -> Result<(), Error> {
+        Self::ensure_field(line, "UT1−UTC", self.ut1, acceptance)
+    }
+
     fn ensure_field(
         line: usize,
         field: &'static str,
         provenance: Option<ValueProvenance>,
         acceptance: EarthOrientationAcceptance,
     ) -> Result<(), Error> {
-        if let Some(provenance) = provenance {
-            if !acceptance.accepts(provenance) {
-                return Err(Error::EarthOrientationValueRejected {
-                    line,
-                    field,
-                    provenance: provenance.label(),
-                    acceptance: acceptance.label(),
-                });
-            }
+        if let Some(provenance) = provenance
+            && !acceptance.accepts(provenance)
+        {
+            return Err(Error::EarthOrientationValueRejected {
+                line,
+                field,
+                provenance: provenance.label(),
+                acceptance: acceptance.label(),
+            });
         }
         Ok(())
     }
@@ -199,6 +207,21 @@ impl EarthOrientationRecord {
     /// Returns the source-provided polar-motion rate `yrt`, when present.
     pub const fn polar_motion_rate_y(self) -> Option<AngularSpeed> {
         self.polar_motion_rate_y
+    }
+
+    fn try_into_earth_rotation_sample<E>(
+        self,
+        time: &TimeContext<'_, E>,
+        acceptance: EarthOrientationAcceptance,
+    ) -> Result<EarthRotationSample, Error> {
+        self.provenance
+            .ensure_ut1_accepted(self.source_line, acceptance)?;
+        let epoch = time.resolve(self.datetime)?;
+        let epoch_tai_nanoseconds = epoch.tai_nanoseconds_since_1900();
+        Ok(EarthRotationSample::new(
+            epoch,
+            Self::required(self.ut1_minus_utc, "UT1−UTC", epoch_tai_nanoseconds)?,
+        ))
     }
 
     /// Resolves this row to a complete interpolation sample under an explicit
@@ -322,6 +345,43 @@ impl EarthOrientationData {
         if samples.is_empty() {
             return Err(Error::InvalidEarthOrientationData {
                 reason: "sample MJD interval contains no records",
+            });
+        }
+        Ok(samples)
+    }
+
+    /// Resolves Earth-rotation samples inside an inclusive typed MJD interval.
+    ///
+    /// Only `UT1−UTC` is required and checked against `acceptance`. Missing
+    /// length of day, polar motion, and celestial-pole offsets do not prevent
+    /// ERA or sidereal-time calculations.
+    pub fn try_earth_rotation_samples_in<E>(
+        &self,
+        time: &TimeContext<'_, E>,
+        start: ModifiedJulianDate<Utc>,
+        end: ModifiedJulianDate<Utc>,
+        acceptance: EarthOrientationAcceptance,
+    ) -> Result<Vec<EarthRotationSample>, Error> {
+        let start = start.as_f64_lossy();
+        let end = end.as_f64_lossy();
+        if start > end {
+            return Err(Error::InvalidEarthOrientationData {
+                reason: "Earth-rotation MJD interval start must not follow its end",
+            });
+        }
+        let samples = self
+            .records
+            .iter()
+            .copied()
+            .filter(|record| {
+                let mjd = record.modified_julian_date.as_f64_lossy();
+                (start..=end).contains(&mjd)
+            })
+            .map(|record| record.try_into_earth_rotation_sample(time, acceptance))
+            .collect::<Result<Vec<_>, _>>()?;
+        if samples.is_empty() {
+            return Err(Error::InvalidEarthOrientationData {
+                reason: "Earth-rotation MJD interval contains no records",
             });
         }
         Ok(samples)

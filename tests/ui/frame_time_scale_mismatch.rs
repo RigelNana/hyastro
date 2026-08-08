@@ -1,9 +1,12 @@
 use hyastro::{
     frame::{Cirs, Frames, State, Tirs},
-    time::{Tai, Tt},
+    time::{EarthOrientationTable, Tai, Tt},
 };
 
-fn mismatch(frames: &Frames<'_, '_, '_>, state: State<Cirs, Tai>) {
+fn mismatch(
+    frames: &Frames<'_, '_, EarthOrientationTable<'_>>,
+    state: State<Cirs, Tai>,
+) {
     let _: State<Tirs, Tt> = frames.transform(state).unwrap();
 }
 

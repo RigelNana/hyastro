@@ -3,7 +3,7 @@
 - 文档状态：依赖基线定稿（调研版）
 - 调研基线：2026-08-05；crates.io 元数据查询日期同为 2026-08-05
 - 配套文档：`docs/PRD.md`、`docs/FEATURES.md`、`docs/CODE_STANDARDS.md`、`docs/LIBRARY_RESEARCH.md`
-- 实现进展：`Cargo.toml` 已锁定 `sofars = 0.6.1`，由默认 `std` feature 启用，用于 IAU 2006/2000A `GCRS → CIRS → TIRS → ITRS` 地球定向链；`hifitime` 保持可选模型 adapter。库内已实现 IERS EOP 20u24 C04 与 finals2000A 解析器，但不引入额外 EOP crate。其余条目仍是依赖决策基线，不代表均已接入。
+- 实现进展：`Cargo.toml` 已锁定 `sofars = 0.6.1`，由默认 `std` feature 启用，用于 IAU 2006/2000A `GCRS → CIRS → TIRS → ITRS` 地球定向链、IAU 2006 日期平/真赤道与日期平黄道、Hipparcos ICRS↔IAU Galactic 转换、Fukushima (2006) 测地坐标与 ITRS 地心直角坐标双向转换，以及 Fairhead–Bretagnon (1990) 完整地心 `TDB−TT` 解析模型；`hifitime` 保持可选模型 adapter。库内已实现 IERS EOP 20u24 C04 与 finals2000A 解析器，但不引入额外 EOP crate。其余条目仍是依赖决策基线，不代表均已接入。
 
 ## 0. 方法与约定
 
@@ -43,13 +43,13 @@
 | libm | **确定采用** | `no_std` 数学内核的浮点函数；固定 `f64`，不引入数值泛型 |
 | serde | **可选 feature `serde`** | 仅 hyastro 自有类型 derive 时直接依赖（P1） |
 | rayon | **可选 feature `rayon`** | 批处理/并行查询（P1） |
-| anise | **可选 feature `anise`** | SPK/PCK/FK/BPC/DAF 生产级后端，default-features=false，MPL-2.0 |
+| anise | **已采用可选 feature `anise`** | 固定 0.10.4、`default-features=false`，作为离线 SPK/DAF 历表后端；MPL-2.0 |
 | tracing + tracing-log | **可选 feature `logging`** | 结构化日志 + `log` crate 桥接（观察 ANISE 内部日志） |
 | csv | **可选 feature `catalog-csv`** | Gaia DR3 CSV 流式适配（P1） |
 | winnow | **可选 feature `text-parsing`** | 自研文本格式解析器（P1/P2） |
 | geographiclib-rs | **可选 feature `geodesy`** | 测地线/大地测量（P1） |
 | vsop87 | **可选 feature `vsop87`** | 太阳/行星低精度历表后端（P1） |
-| sha2 | **可选 feature `integrity`** | 数据/文件校验和（P1） |
+| sha2 | **当前不采用** | 历表加载不要求或校验 SHA-256；内核路径、文件长度和冻结加载顺序保持显式 |
 | flate2（miniz_oxide 后端） | **可选 feature `compression`** | gzip/deflate（P1，纯 Rust） |
 | fitsrs =0.4.2 | **可选 feature `fits`** | CDS 纯 Rust FITS 多 HDU、图像和基础 BINTABLE 读取（P2） |
 | votable（CDS） | **可选 feature `votable`** | VOTable 读/写（P2） |
@@ -82,7 +82,7 @@
 | bzip2 | **明确不采用** | FFI + 低频用途 |
 | fitsio | **明确不采用** | 生产基线不引入 cfitsio FFI；完整 FITS 写入需求须另立决策 |
 | celestial（gaker） | **明确不采用** | 第二套领域模型（时间/帧/坐标），与 hyastro 强类型冲突 |
-| celestial-eop-data | **明确不采用** | 丢失观测/预报标志，并把缺失预测字段写成零；hyastro 在样本转换时执行显式来源接纳策略 |
+| celestial-eop-data | **明确不采用** | 丢失观测/预报标志，并把缺失预测字段写成零；hyastro 保留空列并执行显式来源接纳策略：UT1-only 查询只要求真实 `UT1−UTC`，完整姿态查询仍拒绝缺失字段 |
 | uom 之外的其它单位 crate（dimensional 等） | **明确不采用** | 同 uom 理由 |
 | polars | **明确不采用（生产）** | 仅 ANISE dev-deps 使用；hyastro 用 arrow/parquet 直接接口 |
 
@@ -104,9 +104,9 @@
 
 ### 2.3 MSRV / edition / 工具链
 
-- manifest **无 `rust-version` 字段**（全 workspace 各 crate grep 为 0 处）[观察]；edition 2024 隐含 ≥1.85。
-- **有效 MSRV 由传递依赖决定：≥1.89** [推断]：`nalgebra =0.35` 的 crates.io 元数据 `rust-version=1.89.0`（edition 2024）。这是 hyastro 采用 ANISE 时对全库 MSRV 的主要抬升来源，必须在 MSRV 策略中显式记账（CODE_STANDARDS 15/16 节"不得由非必要依赖被动抬升"；anise 属"必要依赖"时记入基线）。
-- CI：`.github/workflows/rust.yml` 使用 `dtolnay/rust-toolchain@stable`（`setup-anise` action 同），无 MSRV 固定测试；`cargo clippy -p anise -- -D warnings` 与 `cargo fmt --check` 强制执行。
+- ANISE 0.10.4 manifest 无 `rust-version` 字段，edition 2024 隐含 ≥1.85；其传递依赖 `nalgebra =0.35` 的 crates.io 元数据声明 `rust-version=1.89.0`。[观察]
+- hyastro 采用 ANISE 后已把 manifest 的 `rust-version` 明确提升为 **1.89**，使声明 MSRV 与 `--all-features` 的有效依赖下限一致。保留 1.86 会迫使历表后端回退到自研 SPK 解析，重复 ANISE 已验证的实现。[决策]
+- ANISE CI 使用 stable，无独立 MSRV 固定测试；hyastro 必须自行守住声明的 1.89 基线。
 - 文档元数据小缺陷：`anise/Cargo.toml` 的 `[package.metadata.docs.rs]` 将 `rustdoc-args` 误写为 `rustdoc-ars`（发布包中同样存在），docs.rs 的 `--cfg docrs` 可能未生效。[观察]
 
 ### 2.4 模块与公开能力
@@ -198,11 +198,11 @@ validation = []
 
 ### 2.12 接入方式（hyastro 侧设计）
 
-1. **feature 门控**：`[dependencies] anise = { version = "0.10.4", default-features = false, optional = true }`；feature 名 `anise`（`dep:anise` 绑定，遵循 FEATURES.md F-FEAT-003）。不启用 `metaload`（联网）、`analysis`（重依赖）、`embed_ephem`（构建期联网）、`python`、`validation`。
-2. **类型隔离**：hyastro `ephem`/`frame` 模块定义自有 `Ephemeris`/`Frames` 领域类型；ANISE `Almanac` 仅作为私有字段存在于适配器（如 `AniseEphemerisBackend`），构造时接收 hyastro 上下文（数据来源/版本/覆盖区间），查询结果转换为 hyastro 自有 `State`/`FrameTransform`。ANISE 的 `Frame`（NAIF ID）在 hyastro 侧以显式常量/映射表达。
-3. **workspace 统一**：`[workspace.dependencies]` 统一声明 `anise = "0.10.4"`、`hifitime = "4.3"`、`sofars = "0.6"`、`nalgebra = "0.35"`（仅传递）、`der = "0.7"`、`zerocopy = "0.8"` 等，与 nyx 生态保持一致以利上游对齐。
-4. **错误转换**：ANISE 的 snafu 错误经适配层 `map_err` 转为 hyastro thiserror 错误（保留来源、覆盖区间与段标识信息）。
-5. **数据策略**：SPK/PCK 文件由 hyastro 数据工具显式下载（HTTPS、校验和、版本固定：DE440/DE440s、pck11、BPC 日期戳）；运行时 ANISE 只读内存缓冲（`Almanac::load_from_bytes`/`SPK::load`），不联网。
+1. **feature 门控**：已配置 `[dependencies] anise = { version = "=0.10.4", default-features = false, optional = true }`；feature `anise` 同时启用 `std` 与现有 `hifitime` adapter。不启用 `metaload`、`analysis`、`embed_ephem`、`python` 或 `validation`。
+2. **类型隔离**：公开接口只出现 hyastro 的 `Ephemeris`、`EphemerisQuery<Bcrs, S>`、`RelativeState<Bcrs, S>`、`Coverage`、`CelestialBody` 和 `KernelManifest`。ANISE `Almanac`、`Frame` 与 `CartesianState` 均留在私有实现；相对状态以显式目标/中心和自由向量表示，不误用固定 SSB 原点的 `Point3<Bcrs>`。
+3. **版本统一**：hyastro 直接依赖固定 `anise =0.10.4`、兼容 `hifitime =4.3` 与 `sofars =0.6.1`；`nalgebra`、`der`、`zerocopy` 等仅保持 ANISE 传递依赖，不升格为直接依赖。
+4. **错误转换**：ANISE 的错误在适配层映射为稳定的 `UnknownTarget`、`UnknownCenter`、`Coverage`、`UnsupportedFrame`、`UnsupportedSegment`、`CenterCycle`、`CorruptKernel` 或 `Backend`，公开错误不含上游类型。
+5. **数据策略**：调用者显式提供本地内核路径；`KernelManifest` 冻结加载顺序并记录文件长度，后列内核维持较高重叠优先级。运行时不联网、不读取 `latest`、不要求或校验 SHA-256。ANISE 仍负责 DAF 结构解析与段边界检查。
 
 ### 2.13 风险清单
 
@@ -301,7 +301,7 @@ ANISE 0.10.4 满足"生产级 SPICE/DAF/SPK/PCK/参考系后端"定位：纯 Rus
 
 #### 3.2.5 sofars —— **确定采用**（P0）
 
-- 用途：IAU SOFA 纯 Rust 数值内核：时间尺度（21 函数）、地球定向（ERA/GMST/GAST/岁差/章动/极移，`erst`+`pnp` 全族）、坐标转换、FK4/FK5、天体测量（`astro`）、历表（epv00/moon98/plan94）、投影、向量矩阵（`vm`）。ANISE 自身也硬依赖 sofars 0.6.1（`ref/anise/anise/Cargo.toml`，用于 `orientations/dynamic.rs` 的 IAU1976/2000/2006 岁差与 1980/2000A/2000B/2006A 章动）——hyastro 与 ANISE 使用同一数值实现，无重复内核。
+- 用途：IAU SOFA 纯 Rust 数值内核：时间尺度（21 函数）、地球定向（ERA/GMST/GAST/岁差/章动/极移，`erst`+`pnp` 全族）、IAU 2006 `ecm06/eqec06/eceq06` 日期平/真黄道、`astro::ab` 相对论周年光行差、Hipparcos `icrs2g/g2icrs` 规范银道转换、FK4/FK5、天体测量（`astro`）、历表（epv00/moon98/plan94）、投影、向量矩阵（`vm`）。ANISE 自身也硬依赖 sofars 0.6.1（`ref/anise/anise/Cargo.toml`，用于 `orientations/dynamic.rs` 的 IAU1976/2000/2006 岁差与 1980/2000A/2000B/2006A 章动）——hyastro 与 ANISE 使用同一数值实现，无重复内核。
 - 版本约束：`sofars = "=0.6.1"`（crates.io 最新 0.6.1 = 本地 HEAD 版本；0.x 有破坏性 API 变更历史——0.5.0 将 pnp API 从可变引用参数改为返回值，`ref/sofars/CHANGELOG.md`——故用精确版本锁定，升级走显式流程）。
 - features：无。默认：启用（P0）。
 - no_std：**不支持**（edition 2024、无 no_std 特性）——hyastro no_std 内核不得依赖 sofars，相关算法在 `no_std` 内核中自研或经特征门控（`std` 路径用 sofars 数值核对）。
@@ -315,7 +315,7 @@ ANISE 0.10.4 满足"生产级 SPICE/DAF/SPK/PCK/参考系后端"定位：纯 Rus
 
 #### 3.3.1 anise —— **可选 feature `anise`**（见第 2 节深入调研）
 
-- 决策要点复述：`anise = { version = "0.10.4", default-features = false, optional = true }`；不启用 metaload/analysis/embed_ephem/python/validation；适配层私有持有 `Almanac`，公开类型自有。版本/许可/MSRV/风险详见 2.2-2.13。
+- 决策要点复述：`anise = { version = "=0.10.4", default-features = false, optional = true }`；不启用 metaload/analysis/embed_ephem/python/validation；适配层私有持有 `Almanac`，公开类型自有。`astro` 的接收光行时链通过该适配层分别查询观测者接收状态和目标发射状态；真实 DE440s 契约测试再以 ANISE `CN_S` 方向作差分验证。版本/许可/MSRV/风险详见 2.2-2.13。
 
 #### 3.3.2 winnow —— **可选 feature `text-parsing`**（P1/P2）
 

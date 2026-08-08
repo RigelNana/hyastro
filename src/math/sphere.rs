@@ -2,9 +2,7 @@ use core::{f64::consts::PI, fmt, marker::PhantomData};
 
 use libm::{asin, atan2, cos, sin, sqrt};
 
-use super::{
-    Declination, Direction, Error, Latitude, Longitude, PositionAngle, RightAscension, Separation,
-};
+use super::{Direction, Error, Latitude, Longitude, PositionAngle, Separation};
 
 /// A longitude and latitude describing a unit direction in a typed frame.
 pub struct SphericalDirection<F> {
@@ -179,99 +177,6 @@ impl<F> fmt::Debug for SphericalDirection<F> {
             .debug_struct("SphericalDirection")
             .field("longitude", &self.longitude)
             .field("latitude", &self.latitude)
-            .finish()
-    }
-}
-
-/// A right ascension and declination describing a unit direction.
-pub struct EquatorialDirection<F> {
-    right_ascension: RightAscension,
-    declination: Declination,
-    frame: PhantomData<F>,
-}
-
-impl<F> EquatorialDirection<F> {
-    /// Constructs an equatorial direction.
-    pub const fn new(right_ascension: RightAscension, declination: Declination) -> Self {
-        Self {
-            right_ascension,
-            declination,
-            frame: PhantomData,
-        }
-    }
-
-    /// Returns the right ascension.
-    pub const fn right_ascension(self) -> RightAscension {
-        self.right_ascension
-    }
-
-    /// Returns the declination.
-    pub const fn declination(self) -> Declination {
-        self.declination
-    }
-
-    /// Converts to a Cartesian unit direction.
-    pub fn to_direction(self) -> Result<Direction<F>, Error> {
-        let right_ascension = self.right_ascension.as_radians();
-        let declination = self.declination.as_radians();
-        let declination_cosine = cos(declination);
-        Direction::try_from_components([
-            declination_cosine * cos(right_ascension),
-            declination_cosine * sin(right_ascension),
-            sin(declination),
-        ])
-    }
-
-    /// Converts a Cartesian direction to equatorial coordinates.
-    pub fn from_direction(direction: Direction<F>) -> Result<Self, Error> {
-        let [x, y, z] = direction.components();
-        let horizontal = sqrt(x * x + y * y);
-        if horizontal == 0.0 {
-            return Err(Error::UndefinedLongitude);
-        }
-        Ok(Self::new(
-            RightAscension::wrap_radians(atan2(y, x))?,
-            Declination::try_from_radians(asin(z.clamp(-1.0, 1.0)))?,
-        ))
-    }
-
-    /// Returns a stable great-circle separation from another direction.
-    pub fn separation_to(self, rhs: Self) -> Result<Separation, Error> {
-        Separation::try_from_radians(
-            self.to_direction()?
-                .angle_to(rhs.to_direction()?)?
-                .as_radians(),
-        )
-    }
-
-    /// Converts to longitude and latitude semantics without changing the frame.
-    pub fn to_spherical(self) -> Result<SphericalDirection<F>, Error> {
-        Ok(SphericalDirection::new(
-            Longitude::wrap_radians(self.right_ascension.as_radians())?,
-            Latitude::try_from_radians(self.declination.as_radians())?,
-        ))
-    }
-}
-impl<F> Copy for EquatorialDirection<F> {}
-
-impl<F> Clone for EquatorialDirection<F> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<F> PartialEq for EquatorialDirection<F> {
-    fn eq(&self, other: &Self) -> bool {
-        self.right_ascension == other.right_ascension && self.declination == other.declination
-    }
-}
-
-impl<F> fmt::Debug for EquatorialDirection<F> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("EquatorialDirection")
-            .field("right_ascension", &self.right_ascension)
-            .field("declination", &self.declination)
             .finish()
     }
 }

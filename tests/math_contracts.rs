@@ -2,17 +2,17 @@ use core::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use garde::Validate;
-use hyastro::math::{
-    Angle, Declination, DegreesMinutesSeconds, Direction, EquatorialDirection, Error, HourAngle,
-    HoursMinutesSeconds, Latitude, Length, Longitude, Matrix3, PositionAngle, Quaternion,
-    RightAscension, RootOptions, Rotation, RotationTolerance, Separation, SexagesimalSign,
-    SphericalDirection, Vector3,
+use hyastro::{
+    frame::{EquatorialDirection, Icrs},
+    math::{
+        Angle, Declination, DegreesMinutesSeconds, Direction, Error, HourAngle,
+        HoursMinutesSeconds, Latitude, Length, Longitude, Matrix3, PositionAngle, Quaternion,
+        RightAscension, RootOptions, Rotation, RotationTolerance, Separation, SexagesimalSign,
+        SphericalDirection, Vector3,
+    },
 };
 use proptest::prelude::*;
 use rstest::rstest;
-
-#[derive(Debug)]
-struct Icrs;
 
 #[test]
 fn length_conversions_share_one_canonical_unit() {

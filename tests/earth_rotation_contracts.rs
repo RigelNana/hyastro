@@ -4,10 +4,56 @@ use hyastro::{
     math::{Length, Point3, Speed, Vector3},
     time::{
         CelestialPoleOffsetX, CelestialPoleOffsetY, DateTime, EarthOrientationSample,
-        EarthOrientationTable, Error, ExcessLengthOfDay, Gregorian, JulianDate, PolarMotionX,
-        PolarMotionY, Tai, TimeContext, Ut1, Ut1MinusUtc, Utc,
+        EarthOrientationTable, EarthRotationSample, EarthRotationTable, Error, ExcessLengthOfDay,
+        Gregorian, JulianDate, PolarMotionX, PolarMotionY, Tai, TimeContext, Ut1, Ut1MinusUtc, Utc,
     },
 };
+
+#[test]
+fn earth_rotation_table_keeps_ut1_continuous_across_a_utc_leap_second() {
+    let base = TimeContext::builtin();
+    let left = base
+        .resolve(DateTime::<Gregorian, Utc>::from_components(2016, 12, 31, 0, 0, 0, 0).unwrap())
+        .unwrap();
+    let right = base
+        .resolve(DateTime::<Gregorian, Utc>::from_components(2017, 1, 1, 0, 0, 0, 0).unwrap())
+        .unwrap();
+    let midpoint = base
+        .resolve(DateTime::<Gregorian, Utc>::from_components(2016, 12, 31, 12, 0, 0, 0).unwrap())
+        .unwrap();
+    let uncovered = base
+        .resolve(DateTime::<Gregorian, Utc>::from_components(2017, 1, 2, 0, 0, 0, 0).unwrap())
+        .unwrap();
+    let expires = base
+        .resolve(DateTime::<Gregorian, Utc>::from_components(2017, 1, 3, 0, 0, 0, 0).unwrap())
+        .unwrap();
+    let samples = [
+        EarthRotationSample::new(left, Ut1MinusUtc::from_seconds(-0.4).unwrap()),
+        EarthRotationSample::new(right, Ut1MinusUtc::from_seconds(0.6).unwrap()),
+    ];
+    let table = EarthRotationTable::new(&samples, "synthetic leap", expires).unwrap();
+    let time = base.with_earth_rotation(table);
+
+    let rotation = time.earth_rotation_at(midpoint).unwrap();
+    assert_abs_diff_eq!(
+        rotation.ut1_minus_utc().as_seconds(),
+        -0.4,
+        epsilon = 1.0e-12
+    );
+    let tai = JulianDate::<Tai>::from_instant(midpoint, &time).unwrap();
+    let ut1 = JulianDate::<Ut1>::from_instant(midpoint, &time).unwrap();
+    let ut1_minus_tai_seconds =
+        ((ut1.parts().0 - tai.parts().0) + (ut1.parts().1 - tai.parts().1)) * 86_400.0;
+    assert_abs_diff_eq!(ut1_minus_tai_seconds, -36.4, epsilon = 2.0e-11);
+    assert!(matches!(
+        time.earth_rotation_at(uncovered),
+        Err(Error::EarthOrientationUnavailable { .. })
+    ));
+    assert!(matches!(
+        time.earth_rotation_at(expires),
+        Err(Error::EarthOrientationExpired { .. })
+    ));
+}
 
 #[test]
 fn eop_interpolation_keeps_ut1_continuous_across_a_utc_leap_second() {

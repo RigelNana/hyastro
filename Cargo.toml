@@ -2,17 +2,19 @@
 name = "hyastro"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.86"
+rust-version = "1.89"
 description = "Strongly typed astronomical algorithms"
 license = "MIT"
 
 [features]
 default = ["std"]
+anise = ["std", "hifitime", "dep:anise"]
 std = ["dep:garde", "dep:sofars", "jiff?/std", "hifitime?/std"]
 jiff = ["dep:jiff"]
 hifitime = ["dep:hifitime"]
 
 [dependencies]
+anise = { version = "=0.10.4", default-features = false, optional = true }
 garde = { version = "0.22", default-features = false, features = ["derive"], optional = true }
 hifitime = { version = "4.3", default-features = false, optional = true }
 jiff = { version = "0.2.35", default-features = false, optional = true }
@@ -31,3 +33,32 @@ trybuild = "1"
 [[bench]]
 name = "math"
 harness = false
+
+[[example]]
+name = "math_angles_sphere"
+required-features = ["std"]
+
+[[example]]
+name = "time_eop"
+required-features = ["std"]
+
+[[example]]
+name = "time_adapters"
+required-features = ["std", "hifitime", "jiff"]
+
+[[example]]
+name = "frames_earth_orientation"
+required-features = ["std"]
+
+[[example]]
+name = "current_sidereal_time"
+required-features = ["std", "hifitime", "jiff"]
+
+[[example]]
+name = "earth_site"
+required-features = ["std"]
+
+
+[[example]]
+name = "ephemeris_de440s"
+required-features = ["anise"]

@@ -1,6 +1,9 @@
+use crate::constants::time::TT_MINUS_TAI_NANOSECONDS;
+
 use super::{
-    Calendar, Date, DateTime, Duration, EarthOrientation, EarthOrientationTable, Error, Gps,
-    Gregorian, Instant, JulianDate, LeapSeconds, Tai, TimeOfDay, TimeScale, Tt, Ut1, Utc,
+    Calendar, Date, DateTime, DeltaT, Duration, EarthOrientation, EarthOrientationTable,
+    EarthRotation, EarthRotationTable, Error, Gps, Gregorian, Instant, JulianDate, LeapSeconds,
+    Tai, TimeOfDay, TimeScale, Tt, Ut1, Ut1MinusUtc, Utc,
 };
 
 pub(crate) mod sealed {
@@ -65,6 +68,20 @@ impl<'a> TimeContext<'a, NoEarthOrientation> {
         TimeContext {
             leap_seconds: self.leap_seconds,
             earth_orientation,
+        }
+    }
+
+    /// Adds a validated Earth-rotation table to this context's type.
+    ///
+    /// This narrower context supports UT1, ERA, and sidereal time without
+    /// requiring polar motion, celestial-pole offsets, or length of day.
+    pub const fn with_earth_rotation<'e>(
+        self,
+        earth_rotation: EarthRotationTable<'e>,
+    ) -> TimeContext<'a, EarthRotationTable<'e>> {
+        TimeContext {
+            leap_seconds: self.leap_seconds,
+            earth_orientation: earth_rotation,
         }
     }
 }
@@ -136,6 +153,32 @@ impl<'a, E> TimeContext<'a, E> {
         JulianDate::from_datetime(self.represent::<Gregorian, Target>(instant.retag())?)
     }
 
+    pub(crate) fn julian_date_from_ut1_offset<From: TimeScale>(
+        &self,
+        instant: Instant<From>,
+        ut1_minus_utc: Ut1MinusUtc,
+    ) -> Result<JulianDate<Ut1>, Error> {
+        let tai_minus_utc = self.leap_seconds.offset(instant.retag::<Tai>())?;
+        let ut1_minus_tai = ut1_minus_utc.as_duration().checked_sub(tai_minus_utc)?;
+        let tai = self.uniform_julian_date::<From, Tai>(instant)?;
+        let shifted = tai.checked_add_duration(ut1_minus_tai)?;
+        let (first, second) = shifted.parts();
+        JulianDate::from_parts(first, second)
+    }
+
+    fn delta_t_from_ut1_minus_utc<S: TimeScale>(
+        &self,
+        epoch: Instant<S>,
+        ut1_minus_utc: Ut1MinusUtc,
+    ) -> Result<DeltaT<S>, Error> {
+        let tt_minus_tai = Duration::from_nanoseconds(TT_MINUS_TAI_NANOSECONDS);
+        let tai_minus_utc = self.leap_seconds.offset(epoch.retag::<Tai>())?;
+        let tt_minus_ut1 = tt_minus_tai
+            .checked_add(tai_minus_utc)?
+            .checked_sub(ut1_minus_utc.as_duration())?;
+        Ok(DeltaT::new(epoch, tt_minus_ut1))
+    }
+
     fn nominal_nanoseconds(date: Date<Gregorian>, time: TimeOfDay) -> Result<i128, Error> {
         let epoch = Date::<Gregorian>::from_valid_components(1900, 1, 1);
         let days = date.days_since(epoch)?;
@@ -169,6 +212,27 @@ impl<'a, E> TimeContext<'a, E> {
     }
 }
 
+impl<'a, 'e> TimeContext<'a, EarthRotationTable<'e>> {
+    /// Returns the context's Earth-rotation table.
+    pub const fn earth_rotation(&self) -> EarthRotationTable<'e> {
+        self.earth_orientation
+    }
+
+    /// Resolves linearly interpolated Earth-rotation values at an instant.
+    pub fn earth_rotation_at<S: TimeScale>(
+        &self,
+        instant: Instant<S>,
+    ) -> Result<EarthRotation<S>, Error> {
+        self.earth_orientation.at(instant, self.leap_seconds)
+    }
+
+    /// Resolves Delta T, `TT−UT1`, from this context's Earth-rotation data.
+    pub fn delta_t_at<S: TimeScale>(&self, instant: Instant<S>) -> Result<DeltaT<S>, Error> {
+        let rotation = self.earth_rotation_at(instant)?;
+        self.delta_t_from_ut1_minus_utc(instant, rotation.ut1_minus_utc())
+    }
+}
+
 impl<'a, 'e> TimeContext<'a, EarthOrientationTable<'e>> {
     /// Returns the context's Earth-orientation table.
     pub const fn earth_orientation(&self) -> EarthOrientationTable<'e> {
@@ -183,20 +247,10 @@ impl<'a, 'e> TimeContext<'a, EarthOrientationTable<'e>> {
         self.earth_orientation.at(instant, self.leap_seconds)
     }
 
-    pub(crate) fn julian_date_from_orientation<From: TimeScale>(
-        &self,
-        instant: Instant<From>,
-        orientation: EarthOrientation<From>,
-    ) -> Result<JulianDate<Ut1>, Error> {
-        let tai_minus_utc = self.leap_seconds.offset(instant.retag::<Tai>())?;
-        let ut1_minus_tai = orientation
-            .ut1_minus_utc()
-            .as_duration()
-            .checked_sub(tai_minus_utc)?;
-        let tai = self.uniform_julian_date::<From, Tai>(instant)?;
-        let shifted = tai.checked_add_duration(ut1_minus_tai)?;
-        let (first, second) = shifted.parts();
-        JulianDate::from_parts(first, second)
+    /// Resolves Delta T, `TT−UT1`, from this context's complete EOP data.
+    pub fn delta_t_at<S: TimeScale>(&self, instant: Instant<S>) -> Result<DeltaT<S>, Error> {
+        let orientation = self.earth_orientation_at(instant)?;
+        self.delta_t_from_ut1_minus_utc(instant, orientation.ut1_minus_utc())
     }
 }
 
@@ -254,6 +308,20 @@ impl<E> TimeScaleModel<Utc> for TimeContext<'_, E> {
     }
 }
 
+impl TimeScaleModel<Ut1> for TimeContext<'_, EarthRotationTable<'_>> {
+    fn validate_instant<From: TimeScale>(&self, instant: Instant<From>) -> Result<(), Error> {
+        self.earth_rotation_at(instant).map(|_| ())
+    }
+
+    fn julian_date_at<From: TimeScale>(
+        &self,
+        instant: Instant<From>,
+    ) -> Result<JulianDate<Ut1>, Error> {
+        let rotation = self.earth_rotation_at(instant)?;
+        self.julian_date_from_ut1_offset(instant, rotation.ut1_minus_utc())
+    }
+}
+
 impl TimeScaleModel<Ut1> for TimeContext<'_, EarthOrientationTable<'_>> {
     fn validate_instant<From: TimeScale>(&self, instant: Instant<From>) -> Result<(), Error> {
         self.earth_orientation_at(instant).map(|_| ())
@@ -264,6 +332,6 @@ impl TimeScaleModel<Ut1> for TimeContext<'_, EarthOrientationTable<'_>> {
         instant: Instant<From>,
     ) -> Result<JulianDate<Ut1>, Error> {
         let orientation = self.earth_orientation_at(instant)?;
-        self.julian_date_from_orientation(instant, orientation)
+        self.julian_date_from_ut1_offset(instant, orientation.ut1_minus_utc())
     }
 }

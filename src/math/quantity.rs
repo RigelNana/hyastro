@@ -91,6 +91,11 @@ impl Length {
     /// Number of metres in one parsec.
     pub const METRES_PER_PARSEC: f64 = METRES_PER_PARSEC;
 
+    #[cfg(feature = "std")]
+    pub(crate) const fn from_finite(value: f64) -> Self {
+        Self(value)
+    }
+
     /// Constructs a length in metres.
     pub fn from_metres(value: f64) -> Result<Self, Error> {
         Error::ensure_finite("length", value).map(Self)
@@ -181,6 +186,11 @@ impl Coordinate for Length {
 pub struct Speed(f64);
 
 impl Speed {
+    #[cfg(feature = "std")]
+    pub(crate) const fn from_finite(value: f64) -> Self {
+        Self(value)
+    }
+
     /// Constructs a speed in metres per second.
     pub fn from_metres_per_second(value: f64) -> Result<Self, Error> {
         Error::ensure_finite("speed", value).map(Self)
