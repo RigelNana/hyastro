@@ -1,7 +1,8 @@
 use approx::assert_abs_diff_eq;
 use hyastro::time::{
-    Date, DateTime, Duration, Error, Gps, Gregorian, Instant, Julian, JulianDate, JulianEpoch,
-    LeapKind, LeapSecond, LeapSeconds, Tai, TimeContext, TimeOfDay, Tt, Utc, Weekday,
+    CivilDateTime, Date, DateTime, Duration, Error, FixedUtcOffset, Gps, Gregorian, Instant,
+    Julian, JulianDate, JulianEpoch, LeapKind, LeapSecond, LeapSeconds, Tai, TimeContext,
+    TimeInterval, TimeOfDay, Tt, Utc, Weekday,
 };
 use proptest::prelude::*;
 
@@ -252,4 +253,72 @@ fn time_of_day_rejects_silent_component_coercion() {
     assert!(TimeOfDay::new(24, 0, 0, 0).is_err());
     assert!(TimeOfDay::new(12, 30, 60, 0).is_err());
     assert!(DateTime::<Gregorian, Utc>::from_components(2016, 12, 31, 12, 30, 60, 0).is_err());
+}
+
+#[test]
+fn typed_time_interval_is_closed_nonempty_and_exact() {
+    let start = Instant::<Tai>::from_tai_nanoseconds_since_1900(10);
+    let end = Instant::<Tai>::from_tai_nanoseconds_since_1900(25);
+    let interval = TimeInterval::new(start, end).unwrap();
+    assert_eq!(interval.start(), start);
+    assert_eq!(interval.end(), end);
+    assert_eq!(interval.duration(), Duration::from_nanoseconds(15));
+    assert!(interval.contains(start));
+    assert!(interval.contains(end));
+    assert!(!interval.contains(Instant::from_tai_nanoseconds_since_1900(26)));
+    assert!(matches!(
+        TimeInterval::new(start, start),
+        Err(Error::InvalidTimeInterval { .. })
+    ));
+    assert!(matches!(
+        TimeInterval::new(end, start),
+        Err(Error::InvalidTimeInterval { .. })
+    ));
+}
+
+#[test]
+fn fixed_offset_civil_labels_round_trip_without_time_zone_rules() {
+    let context = TimeContext::builtin();
+    let offset = FixedUtcOffset::east_hours(8).unwrap();
+    let local = CivilDateTime::<Gregorian>::new(
+        Date::new(2024, 1, 1).unwrap(),
+        TimeOfDay::new(0, 15, 30, 123_456_789).unwrap(),
+        offset,
+    )
+    .unwrap();
+    let instant = context.resolve_fixed(local).unwrap();
+    let utc = context.represent::<Gregorian, Utc>(instant).unwrap();
+    assert_eq!(
+        (utc.date().year(), utc.date().month(), utc.date().day()),
+        (2023, 12, 31)
+    );
+    assert_eq!(
+        (
+            utc.time().hour(),
+            utc.time().minute(),
+            utc.time().second(),
+            utc.time().nanosecond(),
+        ),
+        (16, 15, 30, 123_456_789)
+    );
+    assert_eq!(
+        context
+            .represent_fixed::<Gregorian, _>(instant, offset)
+            .unwrap(),
+        local
+    );
+    assert!(FixedUtcOffset::east_hours(24).is_err());
+    assert!(FixedUtcOffset::from_seconds(86_400).is_err());
+}
+
+#[test]
+fn fixed_offset_labels_reject_the_utc_leap_second_itself() {
+    let context = TimeContext::builtin();
+    let leap = context
+        .resolve(DateTime::<Gregorian, Utc>::from_components(2016, 12, 31, 23, 59, 60, 0).unwrap())
+        .unwrap();
+    assert!(matches!(
+        context.represent_fixed::<Gregorian, _>(leap, FixedUtcOffset::east_hours(8).unwrap()),
+        Err(Error::FixedOffsetLeapSecondUnsupported)
+    ));
 }

@@ -16,6 +16,16 @@ pub enum Error {
         /// Inclusive upper bound.
         maximum: i128,
     },
+    /// A closed time interval was empty or reversed.
+    #[error(
+        "time interval start {start_tai_nanoseconds} TAI ns must precede end {end_tai_nanoseconds} TAI ns"
+    )]
+    InvalidTimeInterval {
+        /// Inclusive interval start as TAI nanoseconds since 1900-01-01 TAI.
+        start_tai_nanoseconds: i128,
+        /// Inclusive interval end as TAI nanoseconds since 1900-01-01 TAI.
+        end_tai_nanoseconds: i128,
+    },
     /// A calendar date did not exist.
     #[error("{year}-{month:02}-{day:02} is not a valid {calendar} date")]
     InvalidDate {
@@ -42,6 +52,9 @@ pub enum Error {
         /// Operation that overflowed.
         operation: &'static str,
     },
+    /// A fixed-offset civil label could not express a UTC leap-second instant.
+    #[error("fixed-offset civil labels do not represent UTC leap-second instants")]
+    FixedOffsetLeapSecondUnsupported,
     /// Leap-second data had invalid metadata or ordering.
     #[error("invalid leap-second data: {reason}")]
     InvalidLeapSeconds {

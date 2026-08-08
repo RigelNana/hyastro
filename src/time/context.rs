@@ -1,9 +1,10 @@
 use crate::constants::time::TT_MINUS_TAI_NANOSECONDS;
 
 use super::{
-    Calendar, Date, DateTime, DeltaT, Duration, EarthOrientation, EarthOrientationTable,
-    EarthRotation, EarthRotationTable, Error, Gps, Gregorian, Instant, JulianDate, LeapSeconds,
-    Tai, TimeOfDay, TimeScale, Tt, Ut1, Ut1MinusUtc, Utc,
+    Calendar, CivilDateTime, Date, DateTime, DeltaT, Duration, EarthOrientation,
+    EarthOrientationTable, EarthRotation, EarthRotationTable, Error, FixedUtcOffset, Gps,
+    Gregorian, Instant, JulianDate, LeapSeconds, Tai, TimeOfDay, TimeScale, Tt, Ut1, Ut1MinusUtc,
+    Utc,
 };
 
 pub(crate) mod sealed {
@@ -144,6 +145,45 @@ impl<'a, E> TimeContext<'a, E> {
                 operation: "applying fixed time-scale offset",
             })?;
         Self::label_from_nominal(nominal)
+    }
+
+    /// Resolves a conventional fixed-offset civil label to a physical UTC instant.
+    pub fn resolve_fixed<C: Calendar>(
+        &self,
+        value: CivilDateTime<C>,
+    ) -> Result<Instant<Utc>, Error> {
+        let date: Date<Gregorian> = value.date().convert()?;
+        let local_nominal = Self::nominal_nanoseconds(date, value.time())?;
+        let utc_nominal = local_nominal
+            .checked_sub(value.offset().as_duration().as_nanoseconds())
+            .ok_or(Error::Overflow {
+                operation: "subtracting a fixed UTC offset",
+            })?;
+        let utc_label = Self::label_from_nominal::<Gregorian, Utc>(utc_nominal)?;
+        self.leap_seconds.resolve(utc_label)
+    }
+
+    /// Represents a physical instant as a conventional fixed-offset civil label.
+    ///
+    /// A UTC leap-second instant returns an error because its shifted `:60`
+    /// label is outside the invariant of [`CivilDateTime`].
+    pub fn represent_fixed<C: Calendar, S: TimeScale>(
+        &self,
+        instant: Instant<S>,
+        offset: FixedUtcOffset,
+    ) -> Result<CivilDateTime<C>, Error> {
+        let utc = self.leap_seconds.represent::<Gregorian>(instant.retag())?;
+        if utc.time().is_leap_second() {
+            return Err(Error::FixedOffsetLeapSecondUnsupported);
+        }
+        let utc_nominal = Self::nominal_nanoseconds(utc.date(), utc.time())?;
+        let local_nominal = utc_nominal
+            .checked_add(offset.as_duration().as_nanoseconds())
+            .ok_or(Error::Overflow {
+                operation: "adding a fixed UTC offset",
+            })?;
+        let local = Self::label_from_nominal::<C, Utc>(local_nominal)?;
+        CivilDateTime::new(local.date(), local.time(), offset)
     }
 
     fn uniform_julian_date<From: TimeScale, Target: TimeScale>(

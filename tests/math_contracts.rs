@@ -336,3 +336,23 @@ fn bisection_rejects_non_bracketing_interval() {
         Err(Error::NotBracketed { .. })
     ));
 }
+
+#[test]
+fn brent_refinement_preserves_the_bracket_and_converges_on_a_cubic() {
+    let options = RootOptions::new(1.0e-13, 1.0e-14, 64).unwrap();
+    let result = options.brent(1.0, 2.0, |x| x * x * x - x - 2.0).unwrap();
+    assert_abs_diff_eq!(result.root(), 1.521_379_706_804_567_6, epsilon = 1.0e-13);
+    assert!(result.residual().abs() <= 1.0e-13);
+    assert!(result.lower() <= result.root());
+    assert!(result.root() <= result.upper());
+    assert!(result.iterations() < options.max_iterations());
+}
+
+#[test]
+fn brent_refinement_accepts_a_root_at_an_interval_endpoint() {
+    let options = RootOptions::new(1.0e-12, 1.0e-12, 32).unwrap();
+    let result = options.brent(0.0, 2.0, |x| x).unwrap();
+    assert_eq!(result.root(), 0.0);
+    assert_eq!(result.residual(), 0.0);
+    assert_eq!(result.iterations(), 0);
+}

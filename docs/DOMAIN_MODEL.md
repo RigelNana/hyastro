@@ -76,6 +76,8 @@ pub struct Speed(f64);
 
 同维量可以显式转换单位。不同语义量不提供隐式 `From`，需要命名转换，例如 `Altitude::zenith_distance()`。
 
+`RootOptions` 拥有括根求解的显式横坐标容差、函数残差容差和迭代预算；`bisect` 提供确定性二分，`brent` 在始终保留符号括区间的前提下采用逆二次插值、割线或二分回退。调用方不得把大基准绝对时刻直接压入 `f64`，时间事件以括区间起点的相对秒数精化。
+
 ### 3.2 空间、时间和变换
 
 常用静态语义使用封闭标记类型。天文参考系统和时间尺度的标记 trait 由 hyastro 密封；纯 `math` 值仍可携带调用者自有的幻影标签，但只有受检的 `frame` 标记能进入标准框架变换。
@@ -141,6 +143,9 @@ v_to = R_from_to v_from + ω × (R_from_to r_from) + t_dot
 - `Duration`：两个瞬间之间的物理间隔，不携带时间尺度。
 - `JulianDate<S>`、`ModifiedJulianDate<S>`：保留双分量的连续日表示。
 - `Epoch<S>`：供坐标、星表或轨道参数引用的参考瞬间。
+- `TimeInterval<S>`：同一尺度下严格有序的非空闭物理时间区间，端点均包含在内。
+- `FixedUtcOffset`：短于 24 小时的恒定有符号 UTC 秒差，不携带时区规则。
+- `CivilDateTime<C>`：历法日期、常规日内时刻和 `FixedUtcOffset` 的组合；UTC 闰秒瞬间因移位后的 `:60` 不满足常规标签不变量而明确不可表示。
 - `LeapSeconds<'a>`：无分配、版本化的闰秒数据，显式保存起始偏移、覆盖范围和过期日；`LeapSecond` 只表示真正的 ±1 秒事件。
 - `EarthOrientationRecord`：IERS 解析后的强类型记录，保留 UTC/MJD 历元、计算分量和原始空列。`EarthOrientationData` 保存同一产品的有序记录；`try_earth_rotation_samples_in` 只提取 UT1 域，`try_samples_in` 转换完整 EOP 样本。两条路径都要求显式覆盖区间和 `EarthOrientationAcceptance`；观测/预报来源在模块内部按极移、UT1、LOD、天极四域执行，拒绝项不会被静默跳过，源误差列在没有协方差传播模型前不进入公共接口。
 - `EarthRotationSample`、`EarthRotationTable<'a>`：仅保存和插值 `UT1−UTC` 的窄能力路径；表不可变、版本化、带覆盖和过期边界，跨闰秒插值连续的 `UT1−TAI`。它足以支持 UT1、ERA 和恒星时，不伪造或要求无关的 LOD、极移与天极偏差，也不能驱动地固系状态变换。
@@ -194,17 +199,20 @@ CatalogPlace<F>
 
 - `ReceptionLightTime<Bcrs, S>`：目标在发射历元、观测者在接收历元求值后的自由相对位置；保存双历元、自然视线方向、距离、单程光行时、迭代次数和时间残差，不提供跨历元相减得到的伪速度。
 - `SolarApparentEcliptic<S>`：太阳的地心接收视方向，经收敛光行时和地球公转周年光行差后表达在接收历元的 `TrueEclipticEquinoxOfDate` 轴上；保存双历元及光行时诊断，不暗示站心、周日光行差、折射或引力偏折。
+- `EventEvidence<S>`：事件精化后的物理时间括区间、半宽时刻不确定度、有符号判据残差、迭代次数和求值次数。
+- `SolarTermEvent<S>`：太阳地心视黄经到达一个规定 $15^\circ$ 网格位置的事件，保留完整 `SolarApparentEcliptic<S>` 与事件证据。
+- `SolarTermYear`：由固定 UTC 偏移定义公历年归属并按当地民用时间排序的 24 个 `SolarTermYearEntry`；每项同时保存 UTC 物理事件和固定偏移公历标签。
 
 ## 4. 上下文与工作流
 
 上下文是构造完成后不可变、可安全共享的算法输入。上下文不联网、不读取环境变量、不自动选择 latest 数据，也不依赖进程级可变状态。
 
-- `TimeContext<'a, E>` 拥有闰秒策略，并用类型参数 `E` 表达地球自转数据能力；`with_earth_rotation` 接收只含 `UT1−UTC` 的 `EarthRotationTable`，`with_earth_orientation` 接收完整 `EarthOrientationTable`。二者都必须已经验证、不可变且版本化。
+- `TimeContext<'a, E>` 拥有闰秒策略，并用类型参数 `E` 表达地球自转数据能力；`with_earth_rotation` 接收只含 `UT1−UTC` 的 `EarthRotationTable`，`with_earth_orientation` 接收完整 `EarthOrientationTable`。`resolve_fixed`/`represent_fixed` 在同一闰秒策略下转换 `CivilDateTime`，不引入时区数据库。所有输入数据都必须已经验证、不可变且版本化。
 - `Frames` 借用一个具备相应数据能力的 `TimeContext`。任意时间上下文都可通过 `celestial_orientation_at` 只用 TT 生成带历元的 `CelestialOrientationSolution`，并得到日期平/真赤道与日期平/真黄道方向；任一 UT1 上下文都可通过 `sidereal_time_at` 生成 `SiderealTimeSolution`；只有完整 EOP 上下文公开 `earth_orientation_at`、`at` 和 `transform`。完整地球定向主路径是 `GCRS → CIRS → TIRS → ITRS`：IAU 2006/2000A CIP/CIO 模型加入 EOP `dX/dY`，ERA 使用 UT1，极移使用 `xp/yp` 与 TIO locator `s′`；状态变换还要求 LOD 与可用的 EOP 变化率，方向旋转不伪造这些导数。
 - `Earth` 绑定一个显式 `ReferenceEllipsoid`，提供测地坐标与 `Point3<Itrs>` 的双向转换、地心纬度、固定站点、ITRS ENU/NED 基，以及经完整 EOP 链求得的站点 GCRS 状态和局部方向。地心原点、无效椭球和空站点标识均明确失败。
 - `Ephemeris` 拥有冻结顺序的本地内核清单和查询能力，不隐式联网。`EphemerisQuery<F, S>` 同时固定目标、中心、物理历元和参考轴；结果为 `RelativeState<F, S>`，以自由位置/速度向量表达目标相对中心，不把动态中心伪装成 `Point3<Bcrs>` 的固定 SSB 原点。
 - `Astrometry<'context, 'ephemeris, E>` 显式借用 `TimeContext` 与 `Ephemeris`。当前有限距离太阳系路径先在 BCRS 中固定接收时刻的观测者状态，再迭代目标发射时刻；太阳视黄经链使用 SOFA 相对论周年光行差与 `Frames` 的 IAU 2006 日期真黄道变换。上下文不隐式联网或选择历表。
-- `Events` 组合判据、覆盖预检、扫描、括根和精化，返回完整且排序稳定的事件集合。
+- `Events` 当前以 `Astrometry` 为唯一真实计算上下文；`solar_terms_in` 在闭时间区间内连续化周期黄经、扫描括根并用 Brent 精化，`solar_term_year` 再以显式固定 UTC 偏移选择并标记恰好 24 个事件。通用任意判据接缝留到月相这一第二个真实工作流出现后再稳定。
 
 调用者学习高层任务接口即可完成标准路径：
 

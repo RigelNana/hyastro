@@ -11,6 +11,8 @@ pub mod astro;
 #[cfg(feature = "std")]
 pub mod earth;
 pub mod ephem;
+#[cfg(feature = "anise")]
+pub mod event;
 pub mod frame;
 pub mod math;
 pub mod time;

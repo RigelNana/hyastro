@@ -272,6 +272,14 @@ pub struct Astrometry<'context, 'data, E> {
     ephemeris: &'context Ephemeris,
 }
 
+impl<'context, 'data, E> Copy for Astrometry<'context, 'data, E> {}
+
+impl<'context, 'data, E> Clone for Astrometry<'context, 'data, E> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
 impl<'context, 'data, E> Astrometry<'context, 'data, E> {
     /// Constructs astrometric algorithms from explicit immutable dependencies.
     pub const fn new(

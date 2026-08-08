@@ -62,3 +62,15 @@ required-features = ["std"]
 [[example]]
 name = "ephemeris_de440s"
 required-features = ["anise"]
+
+[[example]]
+name = "current_solar_position"
+required-features = ["anise", "jiff"]
+
+[[example]]
+name = "solar_apparent_position"
+required-features = ["anise"]
+
+[[example]]
+name = "solar_terms_year"
+required-features = ["anise"]

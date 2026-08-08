@@ -60,7 +60,7 @@ impl RootOptions {
         self.residual_tolerance
     }
 
-    /// Returns the maximum number of bisection iterations.
+    /// Returns the maximum number of root-refinement iterations.
     pub const fn max_iterations(self) -> u32 {
         self.max_iterations
     }
@@ -126,6 +126,138 @@ impl RootOptions {
             residual: residual.abs(),
             lower,
             upper,
+        })
+    }
+
+    /// Finds a root with Brent's bracket-preserving interpolation method.
+    ///
+    /// The supplied endpoints must bracket a sign change. Inverse quadratic
+    /// interpolation or a secant step is accepted only while it makes adequate
+    /// progress inside the bracket; otherwise the method bisects.
+    pub fn brent<F>(
+        self,
+        mut lower: f64,
+        mut upper: f64,
+        mut function: F,
+    ) -> Result<RootResult, Error>
+    where
+        F: FnMut(f64) -> f64,
+    {
+        Error::ensure_finite("root lower bound", lower)?;
+        Error::ensure_finite("root upper bound", upper)?;
+        if lower >= upper {
+            return Err(Error::InvalidInterval { lower, upper });
+        }
+
+        let original_lower = lower;
+        let original_upper = upper;
+        let mut f_lower = function(lower);
+        let mut f_upper = function(upper);
+        Error::ensure_finite("function value at lower bound", f_lower)?;
+        Error::ensure_finite("function value at upper bound", f_upper)?;
+        if f_lower == 0.0 {
+            return Ok(RootResult::new(lower, 0.0, 0, lower, upper));
+        }
+        if f_upper == 0.0 {
+            return Ok(RootResult::new(upper, 0.0, 0, lower, upper));
+        }
+        if f_lower.is_sign_positive() == f_upper.is_sign_positive() {
+            return Err(Error::NotBracketed {
+                lower,
+                upper,
+                f_lower,
+                f_upper,
+            });
+        }
+
+        if f_lower.abs() < f_upper.abs() {
+            core::mem::swap(&mut lower, &mut upper);
+            core::mem::swap(&mut f_lower, &mut f_upper);
+        }
+        let mut previous = lower;
+        let mut f_previous = f_lower;
+        let mut previous_previous = previous;
+        let mut bisected = true;
+
+        for iteration in 1..=self.max_iterations {
+            let mut candidate = if f_lower != f_previous && f_upper != f_previous {
+                lower * f_upper * f_previous / ((f_lower - f_upper) * (f_lower - f_previous))
+                    + upper * f_lower * f_previous / ((f_upper - f_lower) * (f_upper - f_previous))
+                    + previous * f_lower * f_upper
+                        / ((f_previous - f_lower) * (f_previous - f_upper))
+            } else {
+                upper - f_upper * (upper - lower) / (f_upper - f_lower)
+            };
+
+            let interpolation_limit = (3.0 * lower + upper) * 0.25;
+            let outside_bracket = if lower < upper {
+                candidate < interpolation_limit || candidate > upper
+            } else {
+                candidate > interpolation_limit || candidate < upper
+            };
+            let candidate_step = (candidate - upper).abs();
+            let previous_step = (upper - previous).abs();
+            let older_step = (previous - previous_previous).abs();
+            let unsafe_interpolation = !candidate.is_finite()
+                || outside_bracket
+                || (bisected && candidate_step >= previous_step * 0.5)
+                || (!bisected && candidate_step >= older_step * 0.5)
+                || (bisected && previous_step <= self.x_tolerance)
+                || (!bisected && older_step <= self.x_tolerance);
+            if unsafe_interpolation {
+                candidate = lower + (upper - lower) * 0.5;
+                bisected = true;
+            } else {
+                bisected = false;
+            }
+
+            let f_candidate = function(candidate);
+            Error::ensure_finite("function value at Brent candidate", f_candidate)?;
+            if f_candidate == 0.0 {
+                return Ok(RootResult::new(
+                    candidate,
+                    0.0,
+                    iteration,
+                    lower.min(upper),
+                    lower.max(upper),
+                ));
+            }
+
+            previous_previous = previous;
+            previous = upper;
+            f_previous = f_upper;
+            if f_lower.is_sign_positive() != f_candidate.is_sign_positive() {
+                upper = candidate;
+                f_upper = f_candidate;
+            } else {
+                lower = candidate;
+                f_lower = f_candidate;
+            }
+            if f_lower.abs() < f_upper.abs() {
+                core::mem::swap(&mut lower, &mut upper);
+                core::mem::swap(&mut f_lower, &mut f_upper);
+            }
+
+            let bracket_lower = lower.min(upper);
+            let bracket_upper = lower.max(upper);
+            if f_upper.abs() <= self.residual_tolerance
+                || bracket_upper - bracket_lower <= self.x_tolerance
+            {
+                return Ok(RootResult::new(
+                    upper,
+                    f_upper,
+                    iteration,
+                    bracket_lower,
+                    bracket_upper,
+                ));
+            }
+        }
+
+        Err(Error::NonConvergent {
+            iterations: self.max_iterations,
+            residual: f_upper.abs(),
+            lower: lower.min(upper).max(original_lower),
+            upper: lower.max(upper).min(original_upper),
         })
     }
 }

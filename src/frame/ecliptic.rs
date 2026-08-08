@@ -23,6 +23,11 @@ use super::{EquatorialDirection, Icrs, MeanEclipticEquinoxJ2000};
 pub struct EclipticLongitude(f64);
 
 impl EclipticLongitude {
+    #[cfg(feature = "anise")]
+    pub(crate) const fn from_validated_radians(value: f64) -> Self {
+        Self(value)
+    }
+
     /// Constructs an ecliptic longitude from radians without normalization.
     pub fn try_from_radians(value: f64) -> Result<Self, MathError> {
         MathError::ensure_finite("ecliptic longitude", value)?;

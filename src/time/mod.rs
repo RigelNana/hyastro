@@ -8,11 +8,13 @@ mod duration;
 mod earth_rotation;
 mod eop;
 mod error;
+mod fixed_offset;
 #[cfg(feature = "hifitime")]
 mod hifitime;
 #[cfg(feature = "std")]
 mod iers;
 mod instant;
+mod interval;
 #[cfg(feature = "jiff")]
 mod jiff;
 mod julian;
@@ -32,6 +34,7 @@ pub use eop::{
     EarthOrientationTable, ExcessLengthOfDay, PolarMotionX, PolarMotionY, Ut1MinusUtc,
 };
 pub use error::Error;
+pub use fixed_offset::{CivilDateTime, FixedUtcOffset};
 #[cfg(feature = "hifitime")]
 pub use hifitime::{Hifitime, HifitimeScale};
 #[cfg(feature = "std")]
@@ -40,6 +43,7 @@ pub use iers::{
     EarthOrientationRecord, IersC04, IersFinals2000A,
 };
 pub use instant::{Epoch, Instant, UnixTimestamp};
+pub use interval::TimeInterval;
 #[cfg(feature = "jiff")]
 pub use jiff::Jiff;
 pub use julian::{BesselianEpoch, JulianDate, JulianEpoch, ModifiedJulianDate};
