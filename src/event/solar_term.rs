@@ -3,16 +3,16 @@ use core::{f64::consts::TAU, fmt};
 use std::vec::Vec;
 
 use crate::{
-    astro::SolarApparentEcliptic,
+    astro::SolarApparentPlace,
     frame::EclipticLongitude,
-    math::{Angle, RootOptions},
+    math::Angle,
     time::{
         CivilDateTime, Date, Duration, FixedUtcOffset, Gregorian, Instant, TimeInterval, TimeOfDay,
         TimeScale, Utc,
     },
 };
 
-use super::{Error, EventEvidence, Events, SolarTermSearchOptions};
+use super::{AngularEventSearchOptions, Error, EventEvidence, Events, search::BracketedRootSearch};
 
 /// One of the 24 conventional solar terms, each separated by 15° of apparent solar longitude.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -223,7 +223,7 @@ impl SolarTerm {
 /// One converged apparent-solar-longitude crossing.
 pub struct SolarTermEvent<S: TimeScale> {
     term: SolarTerm,
-    apparent_sun: SolarApparentEcliptic<S>,
+    apparent_sun: SolarApparentPlace<S>,
     evidence: EventEvidence<S>,
 }
 
@@ -239,7 +239,7 @@ impl<S: TimeScale> SolarTermEvent<S> {
     }
 
     /// Returns the fully evaluated apparent solar coordinates at the event.
-    pub const fn apparent_sun(self) -> SolarApparentEcliptic<S> {
+    pub const fn apparent_sun(self) -> SolarApparentPlace<S> {
         self.apparent_sun
     }
 
@@ -325,7 +325,7 @@ impl<'context, 'data, E> Events<'context, 'data, E> {
     pub fn solar_terms_in<S: TimeScale>(
         &self,
         interval: TimeInterval<S>,
-        options: SolarTermSearchOptions,
+        options: AngularEventSearchOptions,
     ) -> Result<Vec<SolarTermEvent<S>>, Error> {
         const TERM_STEP: f64 = TAU / 24.0;
 
@@ -342,7 +342,7 @@ impl<'context, 'data, E> Events<'context, 'data, E> {
             previous_wrapped,
             nearest_term.target_longitude().as_radians(),
         )?;
-        if initial_residual.abs() <= options.longitude_tolerance().as_radians() {
+        if initial_residual.abs() <= options.angular_tolerance().as_radians() {
             events.push(SolarTermEvent {
                 term: nearest_term,
                 apparent_sun: initial_apparent,
@@ -379,8 +379,8 @@ impl<'context, 'data, E> Events<'context, 'data, E> {
             let current_unwrapped = previous_unwrapped + advance;
             let mut boundary_index = libm::floor(previous_unwrapped / TERM_STEP) as i64 + 1;
             let mut boundary = boundary_index as f64 * TERM_STEP;
-            while boundary <= current_unwrapped + options.longitude_tolerance().as_radians() {
-                if boundary > previous_unwrapped + options.longitude_tolerance().as_radians() {
+            while boundary <= current_unwrapped + options.angular_tolerance().as_radians() {
+                if boundary > previous_unwrapped + options.angular_tolerance().as_radians() {
                     let term = SolarTerm::from_longitude_index(boundary_index);
                     let event = self.refine_solar_term(
                         term,
@@ -408,7 +408,7 @@ impl<'context, 'data, E> Events<'context, 'data, E> {
         &self,
         year: i32,
         offset: FixedUtcOffset,
-        options: SolarTermSearchOptions,
+        options: AngularEventSearchOptions,
     ) -> Result<SolarTermYear, Error> {
         let next_year = year.checked_add(1).ok_or(crate::time::Error::Overflow {
             operation: "advancing a solar-term Gregorian year",
@@ -473,9 +473,9 @@ impl<'context, 'data, E> Events<'context, 'data, E> {
     fn evaluate_sun<S: TimeScale>(
         &self,
         epoch: Instant<S>,
-        options: SolarTermSearchOptions,
+        options: AngularEventSearchOptions,
         evaluations: &mut u32,
-    ) -> Result<SolarApparentEcliptic<S>, Error> {
+    ) -> Result<SolarApparentPlace<S>, Error> {
         if *evaluations >= options.max_evaluations() {
             return Err(Error::EvaluationLimitExceeded {
                 maximum: options.max_evaluations(),
@@ -483,7 +483,7 @@ impl<'context, 'data, E> Events<'context, 'data, E> {
         }
         *evaluations += 1;
         self.astrometry
-            .solar_apparent_ecliptic(epoch, options.light_time())
+            .solar_apparent_place(epoch, options.light_time())
             .map_err(Error::from)
     }
 
@@ -492,67 +492,41 @@ impl<'context, 'data, E> Events<'context, 'data, E> {
         term: SolarTerm,
         bracket_start: Instant<S>,
         bracket_end: Instant<S>,
-        options: SolarTermSearchOptions,
+        options: AngularEventSearchOptions,
         evaluations: &mut u32,
     ) -> Result<SolarTermEvent<S>, Error> {
-        let upper_seconds = bracket_end.duration_since(bracket_start)?.as_seconds_f64();
-        let root_options = RootOptions::new(
-            options.time_tolerance().as_seconds_f64(),
-            f64::MIN_POSITIVE,
-            options.max_refinement_iterations(),
-        )?;
         let evaluations_before = *evaluations;
-        let mut evaluation_error = None;
-        let root = root_options.brent(0.0, upper_seconds, |seconds| {
-            if evaluation_error.is_some() {
-                return f64::NAN;
-            }
-            let evaluated = Duration::from_seconds_f64(seconds)
-                .and_then(|offset| bracket_start.checked_add(offset))
+        let root = BracketedRootSearch::refine(
+            bracket_start,
+            bracket_end,
+            options.time_tolerance(),
+            options.max_refinement_iterations(),
+            |epoch| {
+                let apparent = self.evaluate_sun(epoch, options, evaluations)?;
+                Self::longitude_residual(
+                    apparent.longitude().as_radians(),
+                    term.target_longitude().as_radians(),
+                )
                 .map_err(Error::from)
-                .and_then(|epoch| self.evaluate_sun(epoch, options, evaluations))
-                .and_then(|apparent| {
-                    Self::longitude_residual(
-                        apparent.longitude().as_radians(),
-                        term.target_longitude().as_radians(),
-                    )
-                    .map_err(Error::from)
-                });
-            match evaluated {
-                Ok(residual) => residual,
-                Err(error) => {
-                    evaluation_error = Some(error);
-                    f64::NAN
-                }
-            }
-        });
-        if let Some(error) = evaluation_error {
-            return Err(error);
-        }
-        let root = root?;
-        let root_epoch = bracket_start.checked_add(Duration::from_seconds_f64(root.root())?)?;
+            },
+        )?;
+        let root_epoch = root.instant();
         let apparent_sun = self.evaluate_sun(root_epoch, options, evaluations)?;
         let residual = Self::longitude_residual(
             apparent_sun.longitude().as_radians(),
             term.target_longitude().as_radians(),
         )?;
-        if residual.abs() > options.longitude_tolerance().as_radians() {
+        if residual.abs() > options.angular_tolerance().as_radians() {
             return Err(Error::SolarTermResidualExceeded {
                 term: term.english_name(),
                 residual_radians: residual.abs(),
-                tolerance_radians: options.longitude_tolerance().as_radians(),
+                tolerance_radians: options.angular_tolerance().as_radians(),
             });
         }
 
-        let (final_start, final_end, uncertainty) = if root.residual() == 0.0 {
-            (root_epoch, root_epoch, Duration::ZERO)
-        } else {
-            let final_start =
-                bracket_start.checked_add(Duration::from_seconds_f64(root.lower())?)?;
-            let final_end = bracket_start.checked_add(Duration::from_seconds_f64(root.upper())?)?;
-            let uncertainty = Duration::from_seconds_f64((root.upper() - root.lower()) * 0.5)?;
-            (final_start, final_end, uncertainty)
-        };
+        let final_start = root.bracket_start();
+        let final_end = root.bracket_end();
+        let uncertainty = root.time_uncertainty();
         Ok(SolarTermEvent {
             term,
             apparent_sun,

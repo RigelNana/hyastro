@@ -590,6 +590,10 @@ impl Altitude {
             })
         }
     }
+    #[cfg(feature = "anise")]
+    pub(crate) const fn from_finite(value: f64) -> Self {
+        Self(value)
+    }
 
     /// Constructs an altitude from degrees.
     pub fn try_from_degrees(value: f64) -> Result<Self, Error> {

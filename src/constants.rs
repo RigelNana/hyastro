@@ -35,6 +35,13 @@ pub(crate) mod length {
     pub(crate) const METRES_PER_PARSEC: f64 = 3.085_677_581_491_367e16;
 }
 
+pub(crate) mod body {
+    /// Exact nominal solar radius from IAU 2015 Resolution B3.
+    pub(crate) const IAU_2015_NOMINAL_SOLAR_RADIUS_METRES: f64 = 6.957e8;
+    /// Lunar reference-sphere radius from the IAU WGCCRE 2015 report.
+    pub(crate) const IAU_WGCCRE_2015_LUNAR_RADIUS_METRES: f64 = 1_737_400.0;
+}
+
 pub(crate) mod time {
     /// Nanoseconds in one SI microsecond, exact.
     pub(crate) const NANOSECONDS_PER_MICROSECOND: i128 = 1_000;

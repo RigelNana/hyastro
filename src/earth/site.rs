@@ -1,10 +1,10 @@
 use crate::{
     frame::{
-        CoordinateFrame, EarthOrientationSolution, Frames, Gcrs, HorizontalDirection, Itrs, State,
-        StateTransform,
+        CoordinateFrame, EarthAttitudeSolution, EarthOrientationSolution, Frames, Gcrs,
+        HorizontalDirection, Itrs, State, StateTransform,
     },
     math::{Direction, Point3, Speed, Vector3},
-    time::{EarthOrientationTable, Instant, TimeScale},
+    time::{EarthAttitudeTable, EarthOrientationTable, Instant, TimeScale},
 };
 
 use super::{Earth, Error, GeodeticPosition, ReferenceEllipsoid};
@@ -91,6 +91,16 @@ impl<F: CoordinateFrame> NorthEastDown<F> {
     }
 }
 
+/// Model used for a fixed site's inertial velocity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SiteVelocityModel {
+    /// Complete EOP state transform, including length of day and available frame rates.
+    EarthOrientation,
+    /// IERS conventional nominal Earth angular speed, without a length-of-day correction.
+    IersNominalEarthRotation,
+}
+
 /// A fixed site's runtime topocentric frame at one physical epoch.
 ///
 /// The value carries its site geometry, GCRS observer state, and local ENU
@@ -102,6 +112,7 @@ pub struct TopocentricFrame<S: TimeScale> {
     geodetic_position: GeodeticPosition,
     itrs_position: Point3<Itrs>,
     observer_state: State<Gcrs, S>,
+    velocity_model: SiteVelocityModel,
     east_north_up: EastNorthUp<Gcrs>,
 }
 
@@ -129,6 +140,11 @@ impl<S: TimeScale> TopocentricFrame<S> {
     /// Returns the site's geocentric state expressed in GCRS.
     pub const fn observer_state(self) -> State<Gcrs, S> {
         self.observer_state
+    }
+
+    /// Returns the model used to derive the site's inertial velocity.
+    pub const fn velocity_model(self) -> SiteVelocityModel {
+        self.velocity_model
     }
 
     /// Returns the site's local ENU directions expressed in GCRS.
@@ -289,6 +305,21 @@ impl FixedSite {
         self.topocentric_frame_from_orientation(frames.earth_orientation_at(epoch)?)
     }
 
+    /// Evaluates a runtime topocentric frame using observed attitude and nominal Earth rotation.
+    ///
+    /// This explicit fallback requires `UT1−UTC`, polar motion, and celestial-pole
+    /// offsets, but not length of day. Position and local axes use the complete
+    /// observed attitude. Site velocity uses the IERS conventional nominal Earth
+    /// angular speed and therefore does not claim an observed rotation-rate
+    /// correction.
+    pub fn topocentric_frame_with_nominal_rotation_at<S: TimeScale>(
+        &self,
+        epoch: Instant<S>,
+        frames: &Frames<'_, '_, EarthAttitudeTable<'_>>,
+    ) -> Result<TopocentricFrame<S>, Error> {
+        self.topocentric_frame_from_attitude_with_nominal_rotation(frames.earth_attitude_at(epoch)?)
+    }
+
     pub(crate) fn topocentric_frame_from_orientation<S: TimeScale>(
         &self,
         orientation: EarthOrientationSolution<S>,
@@ -308,6 +339,46 @@ impl FixedSite {
             geodetic_position: self.geodetic_position,
             itrs_position: self.itrs_position,
             observer_state,
+            velocity_model: SiteVelocityModel::EarthOrientation,
+            east_north_up,
+        })
+    }
+
+    pub(crate) fn topocentric_frame_from_attitude_with_nominal_rotation<S: TimeScale>(
+        &self,
+        attitude: EarthAttitudeSolution<S>,
+    ) -> Result<TopocentricFrame<S>, Error> {
+        let epoch = attitude.epoch();
+        let itrs_to_cirs = attitude
+            .tirs_to_itrs()
+            .inverse()
+            .then(attitude.cirs_to_tirs().inverse())?;
+        let cirs_position = itrs_to_cirs.apply_vector(self.itrs_position.position())?;
+        let [x, y, _] = cirs_position.components();
+        let angular_speed = crate::constants::earth::NOMINAL_ANGULAR_SPEED_RADIANS_PER_SECOND;
+        let cirs_velocity = Vector3::new(
+            Speed::from_metres_per_second(-angular_speed * y.as_metres())?,
+            Speed::from_metres_per_second(angular_speed * x.as_metres())?,
+            Speed::from_metres_per_second(0.0)?,
+        );
+        let cirs_to_gcrs = attitude.gcrs_to_cirs().inverse();
+        let observer_state = State::new(
+            Point3::from_position(cirs_to_gcrs.apply_vector(cirs_position)?),
+            cirs_to_gcrs.apply_vector(cirs_velocity)?,
+            epoch,
+        );
+        let itrs_to_gcrs = attitude.gcrs_to_itrs().inverse();
+        let east_north_up = EastNorthUp {
+            east: itrs_to_gcrs.apply_direction(self.east_north_up.east())?,
+            north: itrs_to_gcrs.apply_direction(self.east_north_up.north())?,
+            up: itrs_to_gcrs.apply_direction(self.east_north_up.up())?,
+        };
+        Ok(TopocentricFrame {
+            earth: self.earth,
+            geodetic_position: self.geodetic_position,
+            itrs_position: self.itrs_position,
+            observer_state,
+            velocity_model: SiteVelocityModel::IersNominalEarthRotation,
             east_north_up,
         })
     }

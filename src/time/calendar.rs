@@ -131,6 +131,126 @@ impl JulianDayNumber {
     }
 }
 
+/// A signed number of whole calendar years.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CalendarYears(i64);
+
+impl CalendarYears {
+    /// Constructs a signed calendar-year count.
+    pub const fn new(value: i64) -> Self {
+        Self(value)
+    }
+
+    /// Returns the signed year count.
+    pub const fn value(self) -> i64 {
+        self.0
+    }
+}
+
+/// A signed number of whole calendar months.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CalendarMonths(i64);
+
+impl CalendarMonths {
+    /// Constructs a signed calendar-month count.
+    pub const fn new(value: i64) -> Self {
+        Self(value)
+    }
+
+    /// Returns the signed month count.
+    pub const fn value(self) -> i64 {
+        self.0
+    }
+}
+
+/// A signed calendar-relative span whose year and month components are not fixed durations.
+///
+/// Date arithmetic combines the year and month components into one month displacement, applies
+/// [`InvalidDayPolicy`] once, and then applies the day component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CalendarSpan {
+    years: i64,
+    months: i64,
+    days: i64,
+}
+
+impl CalendarSpan {
+    /// Constructs a calendar span.
+    pub const fn new(years: i64, months: i64, days: i64) -> Self {
+        Self {
+            years,
+            months,
+            days,
+        }
+    }
+
+    /// Returns the signed year component.
+    pub const fn years(self) -> i64 {
+        self.years
+    }
+
+    /// Returns the signed month component.
+    pub const fn months(self) -> i64 {
+        self.months
+    }
+
+    /// Returns the signed day component.
+    pub const fn days(self) -> i64 {
+        self.days
+    }
+
+    /// Negates every component with overflow checking.
+    pub fn checked_neg(self) -> Result<Self, Error> {
+        Ok(Self::new(
+            self.years.checked_neg().ok_or(Error::Overflow {
+                operation: "negating calendar-span years",
+            })?,
+            self.months.checked_neg().ok_or(Error::Overflow {
+                operation: "negating calendar-span months",
+            })?,
+            self.days.checked_neg().ok_or(Error::Overflow {
+                operation: "negating calendar-span days",
+            })?,
+        ))
+    }
+}
+
+/// Policy for a calendar displacement whose target month lacks the source day-of-month.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum InvalidDayPolicy {
+    /// Reject the displacement as an invalid target date.
+    Reject,
+    /// Constrain the day to the last valid day of the target month.
+    Constrain,
+}
+
+/// A directional decomposition into whole calendar months followed by whole calendar days.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CalendarDifference {
+    whole_months: i64,
+    remaining_days: i64,
+}
+
+impl CalendarDifference {
+    const fn new(whole_months: i64, remaining_days: i64) -> Self {
+        Self {
+            whole_months,
+            remaining_days,
+        }
+    }
+
+    /// Returns the signed number of whole calendar months.
+    pub const fn whole_months(self) -> i64 {
+        self.whole_months
+    }
+
+    /// Returns the signed whole-day remainder after applying the month component.
+    pub const fn remaining_days(self) -> i64 {
+        self.remaining_days
+    }
+}
+
 /// A validated date in calendar `C` using astronomical year numbering.
 pub struct Date<C: Calendar> {
     year: i32,
@@ -242,6 +362,183 @@ impl<C: Calendar> Date<C> {
                 operation: "adding days to date",
             })?;
         Self::from_julian_day_number(JulianDayNumber(value))
+    }
+
+    /// Adds whole calendar years using an explicit invalid-day policy.
+    pub fn checked_add_years(
+        self,
+        years: CalendarYears,
+        policy: InvalidDayPolicy,
+    ) -> Result<Self, Error> {
+        let months = years.value().checked_mul(12).ok_or(Error::Overflow {
+            operation: "converting calendar years to months",
+        })?;
+        self.checked_add_months(CalendarMonths::new(months), policy)
+    }
+
+    /// Subtracts whole calendar years using an explicit invalid-day policy.
+    pub fn checked_sub_years(
+        self,
+        years: CalendarYears,
+        policy: InvalidDayPolicy,
+    ) -> Result<Self, Error> {
+        let years = years.value().checked_neg().ok_or(Error::Overflow {
+            operation: "negating calendar years",
+        })?;
+        self.checked_add_years(CalendarYears::new(years), policy)
+    }
+
+    /// Adds whole calendar months using an explicit invalid-day policy.
+    pub fn checked_add_months(
+        self,
+        months: CalendarMonths,
+        policy: InvalidDayPolicy,
+    ) -> Result<Self, Error> {
+        let target_index =
+            self.month_index()
+                .checked_add(months.value())
+                .ok_or(Error::Overflow {
+                    operation: "adding calendar months to date",
+                })?;
+        let target_year =
+            i32::try_from(target_index.div_euclid(12)).map_err(|_| Error::Overflow {
+                operation: "converting calendar-month result to year",
+            })?;
+        let target_month =
+            u8::try_from(target_index.rem_euclid(12) + 1).map_err(|_| Error::Overflow {
+                operation: "converting calendar-month result to month",
+            })?;
+        Self::from_adjusted_components(target_year, target_month, self.day, policy)
+    }
+
+    /// Subtracts whole calendar months using an explicit invalid-day policy.
+    pub fn checked_sub_months(
+        self,
+        months: CalendarMonths,
+        policy: InvalidDayPolicy,
+    ) -> Result<Self, Error> {
+        let months = months.value().checked_neg().ok_or(Error::Overflow {
+            operation: "negating calendar months",
+        })?;
+        self.checked_add_months(CalendarMonths::new(months), policy)
+    }
+
+    /// Adds one calendar span, combining its year and month components before applying its days.
+    pub fn checked_add_calendar_span(
+        self,
+        span: CalendarSpan,
+        policy: InvalidDayPolicy,
+    ) -> Result<Self, Error> {
+        let months = span
+            .years()
+            .checked_mul(12)
+            .and_then(|years| years.checked_add(span.months()))
+            .ok_or(Error::Overflow {
+                operation: "combining calendar-span years and months",
+            })?;
+        self.checked_add_months(CalendarMonths::new(months), policy)?
+            .checked_add_days(span.days())
+    }
+
+    /// Subtracts one calendar span using the same component order as addition.
+    pub fn checked_sub_calendar_span(
+        self,
+        span: CalendarSpan,
+        policy: InvalidDayPolicy,
+    ) -> Result<Self, Error> {
+        self.checked_add_calendar_span(span.checked_neg()?, policy)
+    }
+
+    /// Returns the signed number of first-of-month boundaries between two dates.
+    ///
+    /// Day-of-month components are intentionally ignored. For example,
+    /// 2024-01-31 to 2024-02-01 crosses one boundary.
+    pub fn month_boundaries_since(self, earlier: Self) -> Result<i64, Error> {
+        self.month_index()
+            .checked_sub(earlier.month_index())
+            .ok_or(Error::Overflow {
+                operation: "subtracting calendar month indices",
+            })
+    }
+
+    /// Returns the signed number of complete calendar months since another date.
+    ///
+    /// The returned count never carries the adjusted anniversary past this date in the direction
+    /// of travel. A rejected intermediate anniversary is reported rather than silently constrained.
+    pub fn whole_months_since(self, earlier: Self, policy: InvalidDayPolicy) -> Result<i64, Error> {
+        let mut months = self.month_boundaries_since(earlier)?;
+        let endpoint = self.to_julian_day_number().value();
+        let mut anchor = earlier
+            .checked_add_months(CalendarMonths::new(months), policy)?
+            .to_julian_day_number()
+            .value();
+
+        if months > 0 && anchor > endpoint {
+            months = months.checked_sub(1).ok_or(Error::Overflow {
+                operation: "adjusting positive whole calendar months",
+            })?;
+            anchor = earlier
+                .checked_add_months(CalendarMonths::new(months), policy)?
+                .to_julian_day_number()
+                .value();
+        } else if months < 0 && anchor < endpoint {
+            months = months.checked_add(1).ok_or(Error::Overflow {
+                operation: "adjusting negative whole calendar months",
+            })?;
+            anchor = earlier
+                .checked_add_months(CalendarMonths::new(months), policy)?
+                .to_julian_day_number()
+                .value();
+        }
+
+        debug_assert!((months >= 0 && anchor <= endpoint) || (months <= 0 && anchor >= endpoint));
+        Ok(months)
+    }
+
+    /// Decomposes the directional difference into whole calendar months and remaining days.
+    pub fn calendar_difference_since(
+        self,
+        earlier: Self,
+        policy: InvalidDayPolicy,
+    ) -> Result<CalendarDifference, Error> {
+        let whole_months = self.whole_months_since(earlier, policy)?;
+        let anchor = earlier.checked_add_months(CalendarMonths::new(whole_months), policy)?;
+        Ok(CalendarDifference::new(
+            whole_months,
+            self.days_since(anchor)?,
+        ))
+    }
+
+    fn month_index(self) -> i64 {
+        i64::from(self.year) * 12 + i64::from(self.month - 1)
+    }
+
+    fn from_adjusted_components(
+        year: i32,
+        month: u8,
+        day: u8,
+        policy: InvalidDayPolicy,
+    ) -> Result<Self, Error> {
+        let maximum_day = C::days_in_month(year, month).ok_or(Error::InvalidDate {
+            year,
+            month,
+            day,
+            calendar: C::NAME,
+        })?;
+        if day <= maximum_day {
+            return Ok(Self::from_valid_components(year, month, day));
+        }
+        match policy {
+            InvalidDayPolicy::Reject => Err(Error::InvalidDate {
+                year,
+                month,
+                day,
+                calendar: C::NAME,
+            }),
+            InvalidDayPolicy::Constrain => {
+                Ok(Self::from_valid_components(year, month, maximum_day))
+            }
+        }
     }
 
     /// Returns the whole-day difference from another date in the same calendar.

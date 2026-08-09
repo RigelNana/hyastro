@@ -8,7 +8,7 @@ use std::{
 use hyastro::{
     astro::Astrometry,
     ephem::{Ephemeris, KernelManifest},
-    event::{Events, SolarTermSearchOptions},
+    event::{AngularEventSearchOptions, Events},
     time::{FixedUtcOffset, TimeContext},
 };
 
@@ -69,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let year = Events::new(astrometry).solar_term_year(
         inputs.year,
         offset,
-        SolarTermSearchOptions::standard(),
+        AngularEventSearchOptions::standard(),
     )?;
 
     println!(

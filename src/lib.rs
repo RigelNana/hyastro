@@ -8,6 +8,7 @@ mod constants;
 
 #[cfg(feature = "anise")]
 pub mod astro;
+pub mod catalog;
 #[cfg(feature = "std")]
 pub mod earth;
 pub mod ephem;
@@ -16,3 +17,4 @@ pub mod event;
 pub mod frame;
 pub mod math;
 pub mod time;
+pub mod uncertainty;

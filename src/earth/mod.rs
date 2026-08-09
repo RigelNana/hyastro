@@ -16,4 +16,4 @@ pub use model::Earth;
 pub use position::{
     EllipsoidalHeight, GeocentricLatitude, GeodeticLatitude, GeodeticLongitude, GeodeticPosition,
 };
-pub use site::{EastNorthUp, FixedSite, NorthEastDown, TopocentricFrame};
+pub use site::{EastNorthUp, FixedSite, NorthEastDown, SiteVelocityModel, TopocentricFrame};

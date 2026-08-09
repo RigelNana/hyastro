@@ -89,12 +89,21 @@ impl TimeOfDay {
                 NANOSECONDS_PER_DAY - 1,
             ));
         }
+        Ok(Self::from_valid_nanoseconds_since_midnight(value))
+    }
+
+    pub(crate) const fn from_valid_nanoseconds_since_midnight(value: u64) -> Self {
         let seconds = value / NANOSECONDS_PER_SECOND as u64;
         let nanosecond = (value % NANOSECONDS_PER_SECOND as u64) as u32;
         let hour = (seconds / SECONDS_PER_HOUR as u64) as u8;
         let minute = ((seconds % SECONDS_PER_HOUR as u64) / SECONDS_PER_MINUTE as u64) as u8;
         let second = (seconds % SECONDS_PER_MINUTE as u64) as u8;
-        Self::new(hour, minute, second, nanosecond)
+        Self {
+            hour,
+            minute,
+            second,
+            nanosecond,
+        }
     }
 
     pub(crate) fn from_backend_components(

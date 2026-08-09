@@ -10,6 +10,10 @@ pub enum Error {
     #[error(transparent)]
     Math(#[from] crate::math::Error),
 
+    /// A catalog value or space-motion operation was invalid.
+    #[error(transparent)]
+    Catalog(#[from] crate::catalog::Error),
+
     /// A time model could not represent a required epoch.
     #[error(transparent)]
     Time(#[from] crate::time::Error),
@@ -25,6 +29,65 @@ pub enum Error {
     /// A fixed-site or topocentric-frame operation failed.
     #[error(transparent)]
     Earth(#[from] crate::earth::Error),
+
+    /// An atmospheric model input was NaN or infinite.
+    #[error("{field} must be finite, got {value}")]
+    NonFiniteAtmosphericValue {
+        /// Name of the rejected atmospheric field.
+        field: &'static str,
+        /// Rejected value.
+        value: f64,
+    },
+
+    /// An atmospheric model input was outside its explicit accepted interval.
+    #[error("{field} must be in [{minimum}, {maximum}], got {value}")]
+    AtmosphericValueOutOfRange {
+        /// Name of the rejected atmospheric field.
+        field: &'static str,
+        /// Rejected value.
+        value: f64,
+        /// Inclusive lower bound.
+        minimum: f64,
+        /// Inclusive upper bound.
+        maximum: f64,
+    },
+
+    /// A body figure was applied to a different observed target.
+    #[error("body figure for {figure_body} cannot describe observed target {target}")]
+    BodyFigureTargetMismatch {
+        /// Body at the centre of the observed place.
+        target: CelestialBody,
+        /// Body represented by the supplied figure.
+        figure_body: CelestialBody,
+    },
+
+    /// The observer was not outside the supplied spherical body figure.
+    #[error(
+        "observer distance {distance_metres} m from {body} must exceed spherical radius {radius_metres} m"
+    )]
+    ObserverNotOutsideBodyFigure {
+        /// Body whose apparent disk was requested.
+        body: CelestialBody,
+        /// Figure radius in metres.
+        radius_metres: f64,
+        /// Target-centre distance in metres.
+        distance_metres: f64,
+    },
+
+    /// Two apparent disks were evaluated at different reception epochs.
+    #[error(
+        "apparent-disk reception epochs differ: {left_tai_nanoseconds} and {right_tai_nanoseconds} TAI ns"
+    )]
+    ApparentDiskEpochMismatch {
+        /// Left disk epoch.
+        left_tai_nanoseconds: i128,
+        /// Right disk epoch.
+        right_tai_nanoseconds: i128,
+    },
+
+    /// Two apparent disks were evaluated for different topocentric observers.
+    #[error("apparent-disk separation requires one shared topocentric observer")]
+    ApparentDiskObserverMismatch,
 
     /// A light-time tolerance was zero or negative.
     #[error("light-time tolerance must be positive, got {nanoseconds} ns")]
@@ -78,6 +141,17 @@ pub enum Error {
         speed_metres_per_second: f64,
     },
 
+    /// An astrometric catalog place and fixed observer were evaluated at different epochs.
+    #[error(
+        "catalog-place epoch {catalog_tai_nanoseconds} differs from fixed-observer epoch {observer_tai_nanoseconds} TAI ns"
+    )]
+    CatalogPlaceEpochMismatch {
+        /// Astrometric catalog-place epoch as TAI nanoseconds since 1900-01-01 TAI.
+        catalog_tai_nanoseconds: i128,
+        /// Fixed-observer epoch as TAI nanoseconds since 1900-01-01 TAI.
+        observer_tai_nanoseconds: i128,
+    },
+
     /// Reception light-time iteration exhausted its explicit budget.
     #[error(
         "reception light time from {target} to {observer} did not converge after {iterations} iterations: residual {residual_nanoseconds} ns at emission epoch {emission_tai_nanoseconds} TAI ns"
@@ -120,4 +194,26 @@ pub enum Error {
         /// Final attempted emission epoch as TAI nanoseconds since 1900-01-01 TAI.
         emission_tai_nanoseconds: i128,
     },
+}
+
+impl Error {
+    pub(crate) fn ensure_atmospheric_range(
+        field: &'static str,
+        value: f64,
+        minimum: f64,
+        maximum: f64,
+    ) -> Result<f64, Self> {
+        if !value.is_finite() {
+            return Err(Self::NonFiniteAtmosphericValue { field, value });
+        }
+        if !(minimum..=maximum).contains(&value) {
+            return Err(Self::AtmosphericValueOutOfRange {
+                field,
+                value,
+                minimum,
+                maximum,
+            });
+        }
+        Ok(value)
+    }
 }

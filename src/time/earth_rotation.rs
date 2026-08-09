@@ -1,3 +1,5 @@
+use crate::uncertainty::{StandardUncertainty, UncertaintyOrigin};
+
 use super::{Duration, Error, Instant, LeapSeconds, Tai, TimeScale, Ut1MinusUtc, Utc};
 
 /// One `UT1−UTC` observation at an exact UTC-tagged physical instant.
@@ -5,6 +7,7 @@ use super::{Duration, Error, Instant, LeapSeconds, Tai, TimeScale, Ut1MinusUtc, 
 pub struct EarthRotationSample {
     epoch: Instant<Utc>,
     ut1_minus_utc: Ut1MinusUtc,
+    ut1_minus_utc_standard_uncertainty: Option<StandardUncertainty<Duration>>,
 }
 
 impl EarthRotationSample {
@@ -13,7 +16,17 @@ impl EarthRotationSample {
         Self {
             epoch,
             ut1_minus_utc,
+            ut1_minus_utc_standard_uncertainty: None,
         }
+    }
+    /// Associates a source-reported `UT1−UTC` standard uncertainty.
+    #[must_use]
+    pub const fn with_standard_uncertainty(
+        mut self,
+        standard_uncertainty: StandardUncertainty<Duration>,
+    ) -> Self {
+        self.ut1_minus_utc_standard_uncertainty = Some(standard_uncertainty);
+        self
     }
 
     /// Returns the sample epoch.
@@ -24,6 +37,10 @@ impl EarthRotationSample {
     /// Returns the observed `UT1−UTC` value.
     pub const fn ut1_minus_utc(self) -> Ut1MinusUtc {
         self.ut1_minus_utc
+    }
+    /// Returns the source-reported `UT1−UTC` standard uncertainty, when supplied.
+    pub const fn standard_uncertainty(self) -> Option<StandardUncertainty<Duration>> {
+        self.ut1_minus_utc_standard_uncertainty
     }
 }
 
@@ -135,6 +152,11 @@ impl<'a> EarthRotationTable<'a> {
             return Ok(EarthRotation {
                 epoch,
                 ut1_minus_utc: self.samples[0].ut1_minus_utc,
+                ut1_minus_utc_standard_uncertainty: self.samples[0]
+                    .ut1_minus_utc_standard_uncertainty,
+                standard_uncertainty_origin: self.samples[0]
+                    .ut1_minus_utc_standard_uncertainty
+                    .map(|_| UncertaintyOrigin::SourceReported),
             });
         }
 
@@ -176,11 +198,48 @@ impl<'a> EarthRotationTable<'a> {
         let ut1_minus_tai = Duration::from_nanoseconds(libm::round(interpolated) as i128);
         let ut1_minus_utc =
             Ut1MinusUtc::from_duration(ut1_minus_tai.checked_add(query_tai_minus_utc)?)?;
+        let (ut1_minus_utc_standard_uncertainty, standard_uncertainty_origin) =
+            Self::interpolate_standard_uncertainty(
+                left.ut1_minus_utc_standard_uncertainty,
+                right.ut1_minus_utc_standard_uncertainty,
+                fraction,
+            )?;
 
         Ok(EarthRotation {
             epoch,
             ut1_minus_utc,
+            ut1_minus_utc_standard_uncertainty,
+            standard_uncertainty_origin,
         })
+    }
+
+    fn interpolate_standard_uncertainty(
+        left: Option<StandardUncertainty<Duration>>,
+        right: Option<StandardUncertainty<Duration>>,
+        fraction: f64,
+    ) -> Result<
+        (
+            Option<StandardUncertainty<Duration>>,
+            Option<UncertaintyOrigin>,
+        ),
+        Error,
+    > {
+        if fraction == 0.0 {
+            return Ok((left, left.map(|_| UncertaintyOrigin::SourceReported)));
+        }
+        if fraction == 1.0 {
+            return Ok((right, right.map(|_| UncertaintyOrigin::SourceReported)));
+        }
+        let (Some(left), Some(right)) = (left, right) else {
+            return Ok((None, None));
+        };
+        let seconds = (1.0 - fraction) * left.value().as_seconds_f64()
+            + fraction * right.value().as_seconds_f64();
+        let duration = Duration::from_seconds_f64(seconds)?;
+        Ok((
+            Some(StandardUncertainty::from_validated(duration)),
+            Some(UncertaintyOrigin::CorrelationAgnosticLinearInterpolation),
+        ))
     }
 }
 
@@ -189,6 +248,8 @@ impl<'a> EarthRotationTable<'a> {
 pub struct EarthRotation<S: TimeScale> {
     epoch: Instant<S>,
     ut1_minus_utc: Ut1MinusUtc,
+    ut1_minus_utc_standard_uncertainty: Option<StandardUncertainty<Duration>>,
+    standard_uncertainty_origin: Option<UncertaintyOrigin>,
 }
 
 impl<S: TimeScale> EarthRotation<S> {
@@ -200,5 +261,19 @@ impl<S: TimeScale> EarthRotation<S> {
     /// Returns interpolated `UT1−UTC`.
     pub const fn ut1_minus_utc(self) -> Ut1MinusUtc {
         self.ut1_minus_utc
+    }
+
+    /// Returns the `UT1−UTC` standard uncertainty, when source errors support it.
+    ///
+    /// An exact sample preserves the reported value. Between samples this is a
+    /// correlation-agnostic linear upper bound; it excludes EOP interpolation
+    /// error and model discrepancy.
+    pub const fn standard_uncertainty(self) -> Option<StandardUncertainty<Duration>> {
+        self.ut1_minus_utc_standard_uncertainty
+    }
+
+    /// Returns how the available standard uncertainty was obtained.
+    pub const fn standard_uncertainty_origin(self) -> Option<UncertaintyOrigin> {
+        self.standard_uncertainty_origin
     }
 }

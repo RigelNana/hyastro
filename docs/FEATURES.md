@@ -59,6 +59,8 @@
 - **F-QTY-013 P1 内核** 测量值加标准差的轻量表示。
 - **F-QTY-014 P1 内核** 非对称误差和置信区间表示。
 
+当前 `ApparentMagnitude<B, Z>` 以类型参数同时绑定光度通带和星等系统，支持有限负星等、同语义星等差以及与严格正 `FluxRatio` 的双向换算；内置 Johnson V 通带和 Vega、AB、ST 零点标记。物理绝对通量及其带单位谱密度仍未实现，因此 F-QTY-011 只覆盖星等与无量纲比例部分。
+
 ## 3. 线性代数与旋转
 
 ### 3.1 三维向量、点和状态
@@ -186,6 +188,10 @@
 - **F-CAL-010 P0 内核** Gregorian↔Julian 同一日转换。
 - **F-CAL-011 P1 内核** 地区改革日预设作为可选数据，不改变推算历法默认语义。
 - **F-CAL-012 P2 适配** 其他民用/宗教历法通过独立适配器接入，不进入天文时间内核。
+- **F-CAL-013 P1 内核** 分开计算跨越的历月边界数、完整历月数以及完整历月后的剩余整日，不以一个无语义的“月份差”混合三种答案。
+- **F-CAL-014 P1 内核** 历法跨度携带年、月、日分量和月底调整策略；历年、历月不得隐式转换为固定秒数 `Duration`。
+
+当前 `Date<C>` 已支持公历/儒略历验证、月长、闰年、年内日、星期、整日加法和整日差；`CalendarYears`、`CalendarMonths` 与 `CalendarSpan` 保留非固定历法分量，`InvalidDayPolicy` 显式选择拒绝或夹取月底，日期接口同时提供历月边界数、完整历月数和“完整月 + 剩余日”分解。
 
 ### 6.2 日序和历元
 
@@ -311,8 +317,13 @@
 - **F-SID-008 P1 内核** ERA/恒星时角速度。
 - **F-SID-009 P1 工作流** 指定恒星时反求近似 UT1，为事件求根提供初值。
 - **F-SID-010 P0 内核** TT 和 UT1 参数在类型上分开。
+- **F-SOLAR-TIME-001 P1 工作流** 格林尼治平太阳时由 UT1 日内分数定义，不以 UTC 近似。
+- **F-SOLAR-TIME-002 P1 工作流** 真太阳时由日期真赤道与真分点轴上的太阳视赤经和 GAST 得到，定义为真太阳当地时角加 12 小时。
+- **F-SOLAR-TIME-003 P1 内核** 时差固定定义为“真太阳时减平太阳时”，返回 `(-12h, 12h]` 内的强类型有符号时长。
+- **F-SOLAR-TIME-004 P1 内核** 以东经为正把格林尼治平/真太阳时转换为地方平/真太阳时；经度不改变时差。
+- **F-SOLAR-TIME-005 P1 工作流** 太阳时结果保留同一次地心太阳视位置、UT1、GAST、光行时次数和残差，不混入时区或民用时间。
 
-当前实现由 `EarthRotationSample` / `EarthRotationTable` 提供只含 `UT1−UTC` 的数据能力，`Frames::sidereal_time_at` 返回不可变 `SiderealTimeSolution`。ERA、GMST、GAST、地方平恒星时和地方视恒星时不依赖完整 EOP；`EarthOrientationTable` 仍用于需要 LOD、极移和天极偏差的完整地球姿态与状态变换。
+当前实现由 `EarthRotationSample` / `EarthRotationTable` 提供只含 `UT1−UTC` 的数据能力，`Frames::sidereal_time_at` 返回不可变 `SiderealTimeSolution`。ERA、GMST、GAST、地方平恒星时和地方视恒星时不依赖完整 EOP；`Astrometry::solar_time` 组合 `SolarApparentPlace` 与该恒星时结果，返回强类型 `SolarTimeSolution`、地方平/真太阳时和时差。`EarthOrientationTable` 仍用于需要 LOD、极移和天极偏差的完整地球姿态与状态变换。
 
 ### 8.4 极移与完整地球链
 
@@ -435,6 +446,13 @@
 - **F-MOTION-011 P1 内核** 传播后相关系数恢复。
 - **F-MOTION-012 P1 工作流** 大批量星表同历元传播。
 
+当前实现覆盖 F-MOTION-001–006、010–011 的单源核心路径：`SpatialCatalogPlace` 用 TCB 参考历元、ICRS 方向、$\mu_{\alpha *}$ / $\mu_\delta$、严格正周年视差和质心天体测量径向速度表达六参数星表位置；`BarycentricCatalogState` 表达同一物理量的 SSB/ICRS 三维位置速度。两者用 SOFA `starpv` / `pvstar` 双向转换，`propagate_to` 用 SOFA `starpm` 联合传播位置、视差、自行及径向速度，并支持反向历元传播。SOFA 为缺失/极小视差、超速或不收敛输入启用的替代结果不会静默进入强类型值，而是返回带状态位的错误。带不确定度且可为零或负的 `ParallaxMeasurement` 与严格正 `Parallax` 分离。`SpatialCatalogPlaceWithCovariance` 在固定的 $\alpha*$、$\delta$、$\varpi$、$\mu_{\alpha *}$、$\mu_\delta$、$v_r$ 顺序和规范单位下，以五点数值 Jacobian 执行 $J C J^\mathsf{T}$，并恢复传播后的标准不确定度及相关系数。F-MOTION-007–009 和 F-MOTION-012 尚未落地。
+
+可运行星表示例：
+
+- `spatial_catalog_motion`：对 SOFA 六参数参考星执行星表参数→质心状态→星表参数往返，以及目标历元正向/反向传播。
+- `spatial_catalog_observation`：读取调用者提供的 DE BSP 与 IERS C04，把有限距离六参数源传播到接收历元，并通过固定站点真空观测链输出站心视差和地平方向。
+
 ## 11. 天体测量和观测位置
 
 ### 11.1 位置层级
@@ -454,16 +472,18 @@
 - **F-LIGHT-002 P1 工作流** 单程发射光行时。
 - **F-LIGHT-003 P1 工作流** 双程 uplink/downlink 光行时。
 - **F-LIGHT-004 P0 内核** Roemer 几何延迟。
-- **F-LIGHT-005 P0 内核** 太阳引力偏折。
+- **F-LIGHT-005 P0 内核** 太阳有限距离单极引力偏折；必须区分目标即太阳、太阳盘后被遮挡的目标中心和太阳盘前的有限距离目标。
 - **F-LIGHT-006 P1 内核** 木星、土星、地球和多体引力偏折。
 - **F-LIGHT-007 P1 内核** Shapiro 延迟。
 - **F-LIGHT-008 P0 内核** 使用观测者相对 SSB 速度和日心距离的 SOFA 相对论光行差。
 - **F-LIGHT-009 P0 内核** 固定站点路径以地球质心速度与 EOP 驱动的站点 GCRS 速度组合周日和周年光行差。
 - **F-LIGHT-010 P0 内核** 相对论速度变换。
-- **F-LIGHT-011 P1 内核** 掩蔽引力体筛选和近边缘稳定性。
+- **F-LIGHT-011 P1 内核** 掩蔽引力体筛选和近边缘稳定性；太阳单体路径必须按版本化太阳半径判断不透明盘面，并在盘面外调用稳定的 SOFA 有限源公式。
 - **F-LIGHT-012 P0 工作流** 有限距离太阳系目标与无限远恒星采用不同路径。
 
-有限太阳系目标的当前落地范围：`FixedObserverAt<S>` 固定站点接收状态并复用 SOFA 星无关参数；`vacuum_observed_place` 迭代目标发射时刻并返回双历元、距离、自然视线派生的 CIRS 方向、地平方向和收敛诊断。无限远恒星路径仍未落地。
+有限太阳系目标的当前落地范围：`FixedObserverAt<S>` 固定站点接收状态并复用 SOFA 星无关参数；`vacuum_observed_place` 迭代目标发射时刻，按光线最接近太阳的历元应用 SOFA `ld` 有限源太阳单极偏折，再应用相对论光行差，并返回双历元、距离、CIRS 方向、真空地平方向、偏折分类与收敛诊断。太阳目标明确标记为“目标即偏折体”而不自偏折；太阳盘后的目标中心明确标记为被遮挡而不把受限公式伪装成观测结果。`VacuumObservedPlace::apply_refraction` 消耗真空阶段并返回不可再次折射的 `ObservedPlace<S>`。星表源采用独立的参数化链：无限远源使用 `InfiniteCatalogPlace → AstrometricCatalogPlace<S> → VacuumObservedCatalogPlace<S> → ObservedCatalogPlace<S>`，六参数有限距离源使用对应的 `SpatialCatalogPlace` / `AstrometricSpatialCatalogPlace<S>` / `VacuumObservedSpatialCatalogPlace<S>` / `ObservedSpatialCatalogPlace<S>` 类型。两者都应用观测者相关 Roemer 项、`ldsun` 远源太阳偏折、组合站点速度光行差、IAU 2006/2000A、地球定向、真空地平投影和可选折射；空间源另按完整 SSB 到站点基线应用周年及周日视差。星表结果不伪造太阳系目标式发射历元或迭代光行时。多体偏折与 Shapiro 延迟仍未落地。
+
+地心有限目标路径由 `Astrometry::geocentric_apparent_place` 提供统一入口：地球固定在接收历元、目标迭代到发射历元，随后按光线近太阳历元应用同一有限源太阳单极偏折，再应用地球质心周年光行差，并返回保留目标身份、双历元、距离、GCRS、日期真赤道、日期真黄道、偏折处置和收敛证据的 `GeocentricApparentPlace<S>`。`solar_apparent_place` 复用该路径并以 `SolarApparentPlace<S>` 保留太阳专用语义；太阳自偏折明确记为 `NotAppliedToSun`。
 
 ### 11.3 地球和站心修正
 
@@ -479,6 +499,8 @@
 - **F-OBSPLACE-010 P1 内核** parallactic angle。
 - **F-OBSPLACE-011 P1 内核** field rotation 和变化率。
 - **F-OBSPLACE-012 P1 内核** 大气质量。
+
+当前 `ObservedPlace<S>` 路径实现 F-OBSPLACE-008：调用者必须显式提供 `AtmosphericConditions`，生产计算使用 `sofars 0.6.1` 的 SOFA `refco` 系数与 `atioq` CIRS→观测坐标链，并返回模型适用范围分类；结果保留来源真空阶段、双历元、距离和光行时诊断。F-OBSPLACE-009—012 仍未落地。
 
 ### 11.4 Barycentric 校正
 
@@ -526,7 +548,7 @@
 - **F-SITE-013 P2 数据** 板块运动。
 - **F-SITE-014 P2 数据** 固体地球潮、海潮负荷、极潮、大气负荷。
 
-当前实现由 `ReferenceEllipsoid`、`Earth`、`GeodeticPosition` 和 `FixedSite` 提供 F-GEO-001/002/003/005/006/008/009/010 与 F-SITE-001/004/006/007。WGS 84、GRS 80 和自定义椭球均显式绑定；SOFA Fukushima (2006) 路径完成测地坐标与 `Point3<Itrs>` 双向转换，地心原点明确返回未定义错误。固定站点保存零 ITRS 速度及 ENU/NED 基；GCRS 状态和局部方向通过同一完整 EOP 变换求值，不把极移、LOD 或天极偏差伪造为零。站点速度/不连续事件、BCRS、移动观测者和环境数据仍由后续条目负责。
+当前实现由 `ReferenceEllipsoid`、`Earth`、`GeodeticPosition` 和 `FixedSite` 提供 F-GEO-001/002/003/005/006/008/009/010 与 F-SITE-001/004/006/007。WGS 84、GRS 80 和自定义椭球均显式绑定；SOFA Fukushima (2006) 路径完成测地坐标与 `Point3<Itrs>` 双向转换，地心原点明确返回未定义错误。固定站点保存零 ITRS 速度及 ENU/NED 基。完整 EOP 路径使用 LOD 和可用帧率求 GCRS 状态；不含 LOD 的姿态表路径保留 UT1、极移和天极偏差，但只经显式入口使用 IERS 名义自转率。两种 `TopocentricFrame` 均携带可查询的 `SiteVelocityModel`，不会把缺失 LOD 伪造成零或观测量。`AtmosphericConditions` 提供独立的逐次观测环境输入，但不把会随时间变化的气象值固化进 `FixedSite`；站点速度/不连续事件和移动观测者仍由后续条目负责。
 
 ## 13. 大气折射与传播介质
 
@@ -542,6 +564,8 @@
 - **F-REF-008 P1 内核** 地平线附近和模型适用范围错误。
 - **F-REF-009 P1 内核** 折射梯度和高度变化率。
 - **F-REF-010 P1 内核** 气团质量和光程因子。
+
+当前已实现 F-REF-001/002/004 的前向观测路径：`AtmosphericPressure`、`AirTemperature`、`RelativeHumidity` 和 `ObservingWavelength` 在进入 SOFA 前拒绝非有限值及模型区间外值；压力为零显式表示真空，不存在默认大气。`RefractionCorrection` 返回真空减观测天顶距的有符号角量和 `Nominal`、`HighZenithDistance`、`NearHorizon`、`BelowHorizon` 适用范围分类。光学/红外与射电分支由波长按 SOFA 的 100 μm 边界选择；逆解、分层积分、独立差分折射与气团质量仍未实现。
 
 ### 13.2 对流层
 
@@ -665,12 +689,17 @@
 - **F-PHYS-006 P1 内核** 亮边位置角。
 - **F-PHYS-007 P1 适配** 行星经验视星等模型。
 - **F-PHYS-008 P1 工作流** 太阳/月球盘面中心和边缘位置。
+
+当前球形视盘路径使用 `SphericalBodyFigure` 绑定天体、正半径和模型版本；内置 IAU 2015 名义太阳半径与 IAU WGCCRE 2015 月球参考球。`VacuumObservedPlace::apparent_disk` 用收敛的发射目标—接收站点距离计算精确 `asin(R/Δ)` 视半径，返回保留真空中心和形状模型的 `VacuumApparentDisk`。两个同站点、同接收历元视盘可查询中心角距、带符号边缘间隙及分离/相切/部分重叠/包含分类。椭球和三轴椭球轮廓、重叠面积与接触时刻仍未落地。
 - **F-PHYS-009 P1 工作流** 月球光学天平动。
 - **F-PHYS-010 P2 工作流** 月球物理天平动。
 - **F-PHYS-011 P1 工作流** 月面中心经纬度、位置角和轴位置角。
 - **F-PHYS-012 P2 工作流** 行星中央经度、极轴位置角和盘面倾角。
 - **F-PHYS-013 P2 工作流** 土星环倾角和环面位置角。
 - **F-PHYS-014 P2 工作流** 行星卫星相对位置及互掩互食几何。
+- **F-PHYS-015 P1 工作流** 月球经验视星等模型及适用范围诊断。
+
+当前 `HorizonsCompatibleLunarV` 消耗现有 `LunarIllumination<S>` 的三条收敛光行时和物理相位角，计算地心、无大气、积分月面 Johnson V/Vega 星等。`GeocentricLunarVMagnitude<S>` 保留原始照明几何、距离项、相位项、模型标识及 `LunarVApplicability`；相位角小于 $7^\circ$ 的已知偏暗区和月面与地影相交均不会静默标成正常结果。行星经验模型、大气消光和月食亮度衰减仍未实现，F-PHYS-007 保持待实现。
 
 ## 17. 通用事件引擎
 
@@ -692,7 +721,7 @@
 - **F-EVT-016 P1 内核** 确定性并行批量目标搜索。
 - **F-EVT-017 P0 工作流** 整段历表/EOP/大气覆盖预检查。
 
-当前已落地的首个纵向切片：`TimeInterval<S>`、`RootOptions::brent`、`SolarTermSearchOptions` 与 `Events::solar_terms_in` 覆盖闭区间扫描、太阳视黄经周期连续化、符号括根、Brent 精化、端点事件、近时刻去重、求值上限以及残差/括区间/迭代诊断。任意标量判据、极值、切触根、取消和完整覆盖预检查尚未升格为公开通用接缝。
+当前事件数值内核包含两条共享接缝：`RootOptions::brent` 在符号括区间内精化根；内部 `BracketedExtremumSearch` 在三点括区间内用有界 Brent 搜索极小/极大值。`AngularEventSearchOptions` 与 `ExtremumSearchOptions` 分别控制扫描步长、时间/判据容差、精化迭代、历表求值上限和接收光行时。太阳节气、月相、行星配置、驻留、距离/角距/坐标极值均保留端点语义、近时刻去重及 `EventEvidence` 或 `ExtremumEvidence`。任意调用者谓词、切触根、取消和整段数据覆盖预检查仍未升格为公开通用接缝。
 
 ## 18. 地平事件和观测窗口
 
@@ -710,6 +739,8 @@
 - **F-RST-010 P1 工作流** 极昼、极夜、拱极、不升和不落分类。
 - **F-RST-011 P1 工作流** 一日多次穿越和不规则地平线。
 - **F-RST-012 P1 工作流** 中天时高度、方位和时角。
+
+当前实现以 `HorizonCriterion` 明确组合参考高度、`Vacuum`/`Refracted` 坐标阶段和 `HorizonDiskPoint::{Center, UpperLimb, LowerLimb}`。盘面事件在每次天测求值时按 `SphericalBodyFigure` 与收敛站心距离重新计算 `asin(R/Δ)`，而不是把约 `16′` 太阳半径或月球半径写死；`astronomical_clock` 同时展示真空盘面接触和固定 `34′` 标准地平折射接触。该固定折射判据不冒充实时 SOFA 近地平折射，也不包含地形地平线。
 
 ### 18.2 晨昏蒙影和时段
 
@@ -746,7 +777,28 @@
 - **F-PHASE-004 P1 工作流** 下弦。
 - **F-PHASE-005 P1 工作流** 任意相位角。
 - **F-PHASE-006 P1 工作流** 照亮比例及盈亏方向。
-- **F-PHASE-007 P1 工作流** 回归月、朔望月和相邻月相搜索。
+- **F-PHASE-007 P1 工作流** 朔望月周期、相邻月相搜索和区间统计。
+
+当前已实现 `Events::moon_phases_in` 与 `Events::moon_phase_year`：以月球、太阳的地心视位置构造日期真黄道经度差，连续化后扫描并用 Brent 精化 $0^\circ/90^\circ/180^\circ/270^\circ$ 四个主相位。事件同时保留月球与太阳视位置、时间括区间、角残差、迭代数和历表求值数；全年接口按显式固定 UTC 偏移筛选公历年份，不把时区或 UTC 年份混入物理事件定义。
+
+`MoonPhaseAngle` 把任意目标限定在有向整圈 `[0, 2π)`，避免与月心处无向 `[0, π]` 物理 `PhaseAngle` 混用；`Events::moon_phase_angle_in` 在闭物理时间区间内搜索该目标的每次过境，通常每朔望月一次。`MoonPhaseAngleEvent` 保留目标角、实际视黄经差、同一接收历元的日月视位置和完整数值证据。四个主月相事件复用这一实现，而不是维护第二套精化模型。
+
+`Astrometry::lunar_illumination_at` 在同一地球接收历元分别求解月球到地球、太阳到地球的视位置链，并在观测月光离开月球的历元继续求解太阳到月球的照明光行时。结果保留三条光行时，给出地心视日月距角、有向视黄经差、月心处的物理日—月—地相位角、球形月面照亮比例，以及按 `[0, π)` / `[π, 2π)` 定义的盈/亏分支。它不含站心视差、月面地形、天平动或冲日增亮。
+
+上述实现覆盖 F-PHASE-001 至 F-PHASE-007：`Events::synodic_months_in` 直接把相邻同一 `MoonPhaseAngleEvent` 组成 `MeasuredCycle<SynodicMonth, S>`，并可由 `CycleStatistics` 统计闭区间内完整朔望月；不另建平均月相公式。
+
+验证结果：
+
+- 2024 年 UTC 的 50 项 DE440 主月相已逐项对照 [USNO 分钟表](https://aa.usno.navy.mil/api/moon/phases/year?year=2024)，最大差值 39.704489 秒。
+- 2024-03-25 07:00 UTC 的 DE440 月面照亮比例为 99.992998582%，物理相位角为 0.958850084°；[JPL Horizons DE441](https://ssd.jpl.nasa.gov/api/horizons.api?format=text&COMMAND=%27301%27&CENTER=%27500%40399%27&MAKE_EPHEM=%27YES%27&EPHEM_TYPE=%27OBSERVER%27&START_TIME=%272024-03-25%2007%3A00%27&STOP_TIME=%272024-03-25%2007%3A02%27&STEP_SIZE=%271%20m%27&QUANTITIES=%2710%2C24%27) 给出 99.99300% 和 0.9587°。Horizons 的 `S-T-O` 额外包含下行光路恒星光行差，因此预期与物理相位角存在数角秒差异。
+- 任意 $45^\circ$ 有向月相角的 DE440 事件为 2024-03-13 14:32:28.766108145 UTC；同一毫秒的 JPL Horizons DE441 地心视黄经为[月球 38.5055006°](https://ssd.jpl.nasa.gov/api/horizons.api?format=text&COMMAND=%27301%27&CENTER=%27500%40399%27&MAKE_EPHEM=%27YES%27&EPHEM_TYPE=%27OBSERVER%27&START_TIME=%272024-03-13%2014%3A32%3A28.766%27&STOP_TIME=%272024-03-13%2014%3A33%3A28.766%27&STEP_SIZE=%271%20m%27&QUANTITIES=%2731%27)、[太阳 353.5054999°](https://ssd.jpl.nasa.gov/api/horizons.api?format=text&COMMAND=%2710%27&CENTER=%27500%40399%27&MAKE_EPHEM=%27YES%27&EPHEM_TYPE=%27OBSERVER%27&START_TIME=%272024-03-13%2014%3A32%3A28.766%27&STOP_TIME=%272024-03-13%2014%3A33%3A28.766%27&STEP_SIZE=%271%20m%27&QUANTITIES=%2731%27)，有向差为 45.0000007°。
+
+可运行月球示例：
+
+- `lunar_illumination`：输出一个固定 UTC 历元的照亮比例、相位角、有向视黄经差、日月视角距，以及月—地、日—地、日—月三条光行时诊断。
+- `lunar_phase_angle`：搜索 2024 年 3—4 月间任意 $45^\circ$ 有向月相角，并输出事件时刻、实际角度、盈亏分支、照亮比例和数值精化证据。
+- `lunar_phases_year`：按指定公历年与固定 UTC 小时偏移输出主月相及数值精化证据。
+
 - **F-SEASON-001 P1 工作流** 春分、夏至、秋分、冬至，复用太阳地心视黄经事件链。
 - **F-SEASON-002 P1 工作流** 太阳地心视黄经达到任意 $15^\circ$ 节气网格位置；视黄经采用收敛接收光行时、周年光行差和 IAU 2006 日期真黄道语义。
 - **F-SEASON-003 P1 工作流** 按显式固定 UTC 偏移生成恰好 24 项、民用时间有序的公历节气年。
@@ -756,7 +808,7 @@
 可运行太阳示例：
 
 - `solar_apparent_position`：固定 UTC 时刻的太阳地心视黄经、视黄纬、日期真赤经/赤纬、距离和光行时诊断。
-- `current_solar_position`：默认从设备时钟取得当前时刻，也接受调用者给出的可复现 UTC 历元；读取调用者提供的 DE BSP、IERS `finals.all` 与 WGS84 经度/纬度/椭球高，执行 `FixedSite → FixedObserverAt → VacuumObservedPlace`，输出 CIRS 赤经/赤纬、站心真空方位/高度、距离和光行时诊断。它应用站心视差、地球与站点组合光行差、IAU 2006/2000A 地球姿态和极移；明确不含大气折射、Shapiro 延迟和点质量引力偏折。完整站点状态要求目标历元的 EOP 行含 LOD；缺失值不会被当作零。
+- `current_solar_position`：默认从设备时钟取得当前时刻，也接受调用者给出的可复现 UTC 历元；读取调用者提供的 DE BSP、IERS `finals.all`、WGS84 经度/纬度/椭球高以及气压、温度、相对湿度和波长，执行 `FixedSite → FixedObserverAt → VacuumObservedPlace → ObservedPlace`，同时输出真空/折射后高度、CIRS 赤经/赤纬、距离、太阳视直径、光行时诊断、太阳偏折处置、折射量和适用范围。它应用站心视差、有限距离太阳偏折判断、地球与站点组合光行差、IAU 2006/2000A 地球姿态、极移和 SOFA 大气折射；太阳作为偏折体本身明确不自偏折。当前仍不含 Shapiro 延迟。示例使用 `EarthAttitudeTable`，因此当前 `finals.all` 预报行即使缺少 LOD 也可运行；站点速度显式标记为 IERS 名义自转率，不冒充观测 LOD 修正。
 - `solar_terms_year`：按指定公历年与固定 UTC 小时偏移输出 24 个节气及数值精化不确定度。
 
 ### 19.2 行星配置
@@ -771,6 +823,8 @@
 - **F-CFG-008 P1 工作流** 地心与站心配置选择。
 - **F-CFG-009 P1 工作流** 几何与视位置配置选择。
 
+当前实现覆盖 F-CFG-001–009。`RelativeBodyQuery` 固定目标减参考天体的有向次序和 `Geometric`/`Apparent` 语义；`ConfigurationQuery` 再固定合、冲、东方照、西方照及日期真黄经差或真赤经差判据。太阳参考合事件由同一观测原点到目标和太阳的实际距离分类为内合/外合，不由天体名称硬编码。`greatest_elongations_in` 对真实球面角距求极大并按黄经差返回东/西分支；`stations_in` 对连续化日期真黄经的时间导数求根并保留顺行/逆行转换两侧状态。所有工作流同时提供地心入口；完整 EOP 上下文另提供固定站点入口，站心路径复用 `FixedObserverAt` 的光行时、视差、光行差和地球姿态链。
+
 ### 19.3 距离、角距和交点
 
 - **F-EXT-001 P1 工作流** 天体间角距离最小/最大。
@@ -782,6 +836,27 @@
 - **F-EXT-007 P1 工作流** 黄纬/赤纬极值。
 - **F-EXT-008 P2 工作流** 轨道平面交点和近节点时刻。
 - **F-EXT-009 P1 工作流** 角直径、亮度、相位角和照亮面积极值。
+
+当前实现覆盖 F-EXT-001–007。`AngularSeparationExtremumQuery` 搜索真实球面角距而不是经度差代理；`DistanceExtremumQuery` 搜索同时几何天体间距离，可直接表达月球近/远地点和行星近日/远日点；`CoordinateCrossingQuery` 与 `CoordinateExtremumQuery` 明确选择日期真黄纬或真赤纬，并保留交越方向或极值种类。F-EXT-008 的任意轨道平面节点和 F-EXT-009 的角直径、亮度、相位角及照亮面积复合极值尚未实现。
+
+验证结果：本地 DE440 在 2024 全年得到 6 次水星合、7 次最大距、7 次驻留和 13 次月球近地点；2024-03-24 最大东距为 $18.701601878^\circ$、UTC 22:34:04.866，与 [JPL Horizons](https://ssd.jpl.nasa.gov/horizons/) 在 22:34 UTC 给出的 $18.7016^\circ$ 一致。契约测试还以北京固定站点验证站心与地心角距极值的时刻和角度均不同，防止固定站点入口退化为地心计算。可运行示例为 `planetary_events`。
+
+### 19.4 天文年与月周期
+
+- **F-PERIOD-001 P1 工作流** 由相邻事件测得的天文周期结果保留周期种类、首尾物理事件、实际 `Duration`、时间尺度、模型/历表标识和数值搜索证据。
+- **F-PERIOD-002 P1 工作流** 回归年与同名分点年分开：回归年是带求值历元和平均太阳/分点模型的局部平均周期，分点年测量相邻同类实际分点事件。
+- **F-PERIOD-003 P2 工作流** 恒星年以固定惯性参考方向和日心地球状态的一整圈为判据。
+- **F-PERIOD-004 P2 工作流** 近点年以相邻地球近日点事件为判据。
+- **F-PERIOD-005 P2 工作流** 交点年以太阳相对同一月球轨道交点的一整圈为判据。
+- **F-PERIOD-006 P1 工作流** 朔望月由同一有向月相的相邻事件测量，复用 `Events::moon_phase_angle_in`，不另建近似月相链。
+- **F-PERIOD-007 P2 工作流** 恒星月和回归月分别使用固定惯性黄道与日期平均分点黄道的一整圈判据。
+- **F-PERIOD-008 P2 工作流** 近点月使用相邻月球近地点事件，交点月使用同向同一交点穿越事件。
+- **F-PERIOD-009 P1 工作流** 对闭区间内完整周期计算样本数、最小值、最大值、算术平均值和标准差；被区间截断的周期不得混入统计。
+- **F-PERIOD-010 P1 内核** 文献平均周期只能作为带来源、历元和适用范围的参考值或搜索步长，不得伪装成精确物理时长或替代事件求解。
+
+当前 `event::period` 已实现统一的 `MeasuredCycle<K, S>`、强类型首尾事件、`CycleEvidence`、内核清单与参考轴溯源以及 `CycleStatistics`。`Events` 公开分点年、恒星年、近点年、交点年、朔望月、恒星月、回归月、近点月和交点月的闭区间工作流；`ModeledCycle<TropicalYear, S>` 另行提供带求值历元与 J500.0—J3500.0 推荐范围的 Meeus 平均太阳黄经导数模型，不把它冒充相邻分点事件间隔。近点年在地心日距的候选极小值中解析月球尺度子结构，交点年使用日期平均黄道上的瞬时月球密切轨道交点。
+
+验证结果：`tests/period_contracts.rs` 以本地 DE440 在 2021—2025 年区间运行全部九种事件测量工作流，并检查周期量级、首尾顺序、历表溯源和统计不变量；`astronomical_cycles` 示例输出分点年与朔望月的样本统计。长期 BSP 工作流应使用 `--release`：同一三年示例在当前工作站的发布构建纯运行耗时 0.33 秒；调试构建因未优化的多次光行时与框架链耗时 23.75 秒。
 
 ## 20. 掩星、凌日与食
 
@@ -886,6 +961,10 @@
 - **F-UNC-006 P1 工作流** 星表历元传播不确定度。
 - **F-UNC-007 P1 工作流** 参考系/EOP 不确定度。
 - **F-UNC-008 P2 工作流** 事件时刻、食路径和掩星路径不确定度。
+
+当前实现了 F-UNC-001 的强类型标准不确定度、有限对称半正定 `CorrelationMatrix<N>`，以及六参数星表完整协方差；`StandardUncertainty<Q>` 保留物理量和规范单位并拒绝负值。F-UNC-002、F-UNC-004 和 F-UNC-006 的首个纵向切片固定采用 $\alpha*$、$\delta$、$\varpi$、$\mu_{\alpha *}$、$\mu_\delta$、$v_r$ 顺序，分别使用 rad、rad、rad、rad/s、rad/s、m/s；围绕 SOFA `starpm` 的局部切平面五点数值 Jacobian 执行 $J C J^\mathsf{T}$，同时返回 Jacobian、传播后的类型化标准不确定度和相关矩阵。
+
+F-UNC-007 的 EOP 入口解析 IERS C04 误差列和 `finals2000A` Bulletin A 误差列。区间端点采用相关性未知时的线性上界 $(1-t)\sigma_0+t\sigma_1$，结果以 `UncertaintyOrigin` 明示来源或传播规则；任一端缺值时不伪造结果。通用解析 Jacobian、Monte Carlo、Gaia 数据适配，以及 EOP 经姿态矩阵继续传播到天球方向仍未实现。
 
 ## 25. 数据格式、序列化与互操作
 

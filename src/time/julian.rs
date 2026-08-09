@@ -67,6 +67,18 @@ impl<S: TimeScale> JulianDate<S> {
         (self.first, self.second)
     }
 
+    #[cfg(feature = "anise")]
+    pub(crate) fn nominal_fraction_since_midnight(self) -> f64 {
+        let (sum, error) = Self::two_sum(self.first + 0.5, self.second);
+        let mut fraction = (sum - floor(sum)) + error;
+        if fraction < 0.0 {
+            fraction += 1.0;
+        } else if fraction >= 1.0 {
+            fraction -= 1.0;
+        }
+        fraction
+    }
+
     /// Returns a single floating-point value with explicit precision loss.
     pub fn as_f64_lossy(self) -> f64 {
         self.first + self.second

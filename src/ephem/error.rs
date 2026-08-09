@@ -37,6 +37,26 @@ pub enum Error {
         right_tai_nanoseconds: i128,
     },
 
+    /// A spherical body-figure model had no identifier.
+    #[error("spherical body-figure identifier must not be empty")]
+    EmptyBodyFigureIdentifier,
+
+    /// A system barycentre was assigned a physical surface.
+    #[error("{body} is a system barycentre and has no physical surface")]
+    BodyHasNoPhysicalSurface {
+        /// Identity that cannot own a body figure.
+        body: CelestialBody,
+    },
+
+    /// A spherical body-figure radius was zero or negative.
+    #[error("spherical figure radius for {body} must be positive, got {metres} m")]
+    InvalidSphericalBodyRadius {
+        /// Body whose figure was rejected.
+        body: CelestialBody,
+        /// Rejected radius in metres.
+        metres: f64,
+    },
+
     /// No kernels were supplied to an ephemeris.
     #[cfg(feature = "anise")]
     #[error("an ephemeris kernel manifest must not be empty")]

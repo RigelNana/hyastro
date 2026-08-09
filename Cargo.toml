@@ -26,6 +26,7 @@ thiserror = { version = "2", default-features = false }
 approx = "0.5"
 criterion = "0.8"
 mockall = "0.13"
+ratatui = "0.30.2"
 proptest = "1"
 rstest = "0.26"
 trybuild = "1"
@@ -74,3 +75,35 @@ required-features = ["anise"]
 [[example]]
 name = "solar_terms_year"
 required-features = ["anise"]
+
+[[example]]
+name = "astronomical_cycles"
+required-features = ["anise"]
+
+[[example]]
+name = "planetary_events"
+required-features = ["anise"]
+
+[[example]]
+name = "lunar_illumination"
+required-features = ["anise"]
+
+[[example]]
+name = "lunar_phase_angle"
+required-features = ["anise"]
+
+[[example]]
+name = "lunar_phases_year"
+required-features = ["anise"]
+
+[[example]]
+name = "spatial_catalog_motion"
+required-features = ["std"]
+
+[[example]]
+name = "spatial_catalog_observation"
+required-features = ["anise"]
+
+[[example]]
+name = "astronomical_clock"
+required-features = ["anise", "jiff"]

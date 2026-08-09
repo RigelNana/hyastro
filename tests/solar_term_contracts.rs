@@ -3,7 +3,7 @@
 use hyastro::{
     astro::{Astrometry, ReceptionLightTimeOptions},
     ephem::{Ephemeris, KernelManifest},
-    event::{Error, Events, SolarTerm, SolarTermSearchOptions},
+    event::{AngularEventSearchOptions, Error, Events, SolarTerm},
     math::Angle,
     time::{
         CivilDateTime, Date, Duration, FixedUtcOffset, Gregorian, TimeContext, TimeInterval,
@@ -16,7 +16,7 @@ fn solar_term_search_options_reject_invalid_controls() {
     let angle = Angle::from_radians(1.0e-12).unwrap();
     let light_time = ReceptionLightTimeOptions::standard();
     assert!(matches!(
-        SolarTermSearchOptions::new(
+        AngularEventSearchOptions::new(
             Duration::ZERO,
             Duration::from_milliseconds(1).unwrap(),
             angle,
@@ -27,7 +27,7 @@ fn solar_term_search_options_reject_invalid_controls() {
         Err(Error::InvalidSearchDuration { .. })
     ));
     assert!(matches!(
-        SolarTermSearchOptions::new(
+        AngularEventSearchOptions::new(
             Duration::from_days(1).unwrap(),
             Duration::ZERO,
             angle,
@@ -38,7 +38,7 @@ fn solar_term_search_options_reject_invalid_controls() {
         Err(Error::InvalidSearchDuration { .. })
     ));
     assert!(matches!(
-        SolarTermSearchOptions::new(
+        AngularEventSearchOptions::new(
             Duration::from_days(1).unwrap(),
             Duration::from_milliseconds(1).unwrap(),
             Angle::from_radians(-1.0).unwrap(),
@@ -46,10 +46,10 @@ fn solar_term_search_options_reject_invalid_controls() {
             1_024,
             light_time,
         ),
-        Err(Error::InvalidLongitudeTolerance { .. })
+        Err(Error::InvalidAngularTolerance { .. })
     ));
     assert!(matches!(
-        SolarTermSearchOptions::new(
+        AngularEventSearchOptions::new(
             Duration::from_days(1).unwrap(),
             Duration::from_milliseconds(1).unwrap(),
             angle,
@@ -70,7 +70,7 @@ fn de440s_2024_solar_terms_match_hong_kong_observatory_minutes() {
     let astrometry = Astrometry::new(&time, &ephemeris);
     let events = Events::new(astrometry);
     let offset = FixedUtcOffset::east_hours(8).unwrap();
-    let options = SolarTermSearchOptions::standard();
+    let options = AngularEventSearchOptions::standard();
     let year = events.solar_term_year(2024, offset, options).unwrap();
 
     // Hong Kong Observatory 24SolarTerms_2024.xml. Values are Hong Kong
@@ -117,7 +117,7 @@ fn de440s_2024_solar_terms_match_hong_kong_observatory_minutes() {
         assert_eq!(entry.local_time().date().year(), 2024);
         assert!(
             event.evidence().residual().as_radians().abs()
-                <= options.longitude_tolerance().as_radians()
+                <= options.angular_tolerance().as_radians()
         );
         assert!(event.evidence().time_uncertainty() <= Duration::from_microseconds(500).unwrap());
         assert!(event.evidence().iterations() <= options.max_refinement_iterations());
@@ -155,7 +155,7 @@ fn de440s_2024_solar_terms_match_hong_kong_observatory_minutes() {
     assert_eq!(endpoint_events[0].term(), SolarTerm::MinorCold);
     assert_eq!(endpoint_events[0].instant(), first.instant());
 
-    let limited = SolarTermSearchOptions::new(
+    let limited = AngularEventSearchOptions::new(
         Duration::from_days(1).unwrap(),
         Duration::from_milliseconds(1).unwrap(),
         Angle::from_radians(1.0e-12).unwrap(),

@@ -109,9 +109,11 @@ fn celestial_orientation_binds_of_date_coordinates_to_its_epoch() {
     let mean = solution.mean_equatorial(gcrs).unwrap();
     let true_equatorial = solution.true_equatorial(gcrs).unwrap();
     let ecliptic = solution.mean_ecliptic(icrs).unwrap();
+    let gcrs_ecliptic = solution.mean_ecliptic_from_gcrs(gcrs).unwrap();
     assert_eq!(mean.epoch(), epoch);
     assert_eq!(true_equatorial.epoch(), epoch);
     assert_eq!(ecliptic.epoch(), epoch);
+    assert_eq!(gcrs_ecliptic.epoch(), epoch);
     assert!(
         solution
             .gcrs_from_mean_equatorial(mean)
@@ -139,6 +141,15 @@ fn celestial_orientation_binds_of_date_coordinates_to_its_epoch() {
             .as_radians()
             < 1.0e-14
     );
+    assert!(
+        solution
+            .gcrs_from_mean_ecliptic(gcrs_ecliptic)
+            .unwrap()
+            .separation_to(gcrs)
+            .unwrap()
+            .as_radians()
+            < 1.0e-14
+    );
 
     let wrong_epoch = epoch
         .checked_add(Duration::from_seconds(1).unwrap())
@@ -157,6 +168,14 @@ fn celestial_orientation_binds_of_date_coordinates_to_its_epoch() {
     );
     assert!(matches!(
         solution.icrs_from_mean_ecliptic(wrong_ecliptic),
+        Err(FrameError::EpochMismatch { .. })
+    ));
+    let wrong_gcrs_ecliptic = EclipticDirectionAt::<MeanEclipticEquinoxOfDate, Utc>::new(
+        wrong_epoch,
+        gcrs_ecliptic.coordinates(),
+    );
+    assert!(matches!(
+        solution.gcrs_from_mean_ecliptic(wrong_gcrs_ecliptic),
         Err(FrameError::EpochMismatch { .. })
     ));
 }

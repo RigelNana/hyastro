@@ -7,7 +7,7 @@ use hyastro::{
     },
 };
 
-const FINALS_2000_A: &str = include_str!("../data/eop/finals2000a-2026-08-06.all");
+const FINALS_2000_A: &str = include_str!("../data/eop/finals2000a-2026-08-09.all");
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let base = TimeContext::builtin();

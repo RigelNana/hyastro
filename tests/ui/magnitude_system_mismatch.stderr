@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/ui/magnitude_system_mismatch.rs:6:34
+  |
+6 |     let _ = vega.difference_from(ab);
+  |                  --------------- ^^ expected `ApparentMagnitude<JohnsonV, Vega>`, found `ApparentMagnitude<JohnsonV, Ab>`
+  |                  |
+  |                  arguments to this method are incorrect
+  |
+  = note: expected struct `ApparentMagnitude<JohnsonV, Vega>`
+             found struct `ApparentMagnitude<JohnsonV, Ab>`
+note: method defined here
+ --> src/math/photometry.rs
+  |
+  |     pub fn difference_from(self, reference: Self) -> Result<MagnitudeDifference, Error> {
+  |            ^^^^^^^^^^^^^^^

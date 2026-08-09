@@ -1,5 +1,9 @@
 use approx::assert_abs_diff_eq;
 use hyastro::{
+    earth::{
+        Earth, EllipsoidalHeight, GeodeticLatitude, GeodeticLongitude, GeodeticPosition,
+        SiteVelocityModel,
+    },
     frame::{Cirs, Frames, Gcrs, Itrs, State, Tirs},
     math::{Length, Longitude, Point3, Speed, Vector3},
     time::{
@@ -7,10 +11,11 @@ use hyastro::{
         EarthOrientationProduct, EarthOrientationTable, EarthRotationTable, Error, Gregorian,
         IersC04, IersFinals2000A, JulianDate, ModifiedJulianDate, TimeContext, Tt, Ut1, Utc,
     },
+    uncertainty::UncertaintyOrigin,
 };
 
 const C04: &str = include_str!("../data/eop/eop-20u24-c04-1962-now-2026-08-06.txt");
-const FINALS_2000_A: &str = include_str!("../data/eop/finals2000a-2026-08-06.all");
+const FINALS_2000_A: &str = include_str!("../data/eop/finals2000a-2026-08-09.all");
 
 #[test]
 fn c04_snapshot_preserves_complete_values_rates_and_coverage() {
@@ -52,6 +57,50 @@ fn c04_snapshot_preserves_complete_values_rates_and_coverage() {
     );
     assert!(first.polar_motion_rate_x().is_some());
     assert!(first.polar_motion_rate_y().is_some());
+    assert_abs_diff_eq!(
+        first
+            .polar_motion_x_standard_uncertainty()
+            .unwrap()
+            .value()
+            .as_degrees()
+            * 3_600.0,
+        0.030,
+        epsilon = 1.0e-15
+    );
+    assert_abs_diff_eq!(
+        first
+            .ut1_minus_utc_standard_uncertainty()
+            .unwrap()
+            .value()
+            .as_seconds_f64(),
+        0.002,
+        epsilon = 5.0e-10
+    );
+    assert_abs_diff_eq!(
+        first
+            .celestial_pole_offset_x_standard_uncertainty()
+            .unwrap()
+            .value()
+            .as_degrees()
+            * 3_600.0,
+        0.004_774,
+        epsilon = 1.0e-15
+    );
+    assert_abs_diff_eq!(
+        first
+            .excess_length_of_day_standard_uncertainty()
+            .unwrap()
+            .value()
+            .as_seconds_f64(),
+        0.001_4,
+        epsilon = 5.0e-10
+    );
+    assert!(
+        first
+            .polar_motion_rate_x_standard_uncertainty()
+            .unwrap()
+            .is_zero()
+    );
     let time = TimeContext::builtin();
     let samples = data
         .try_samples_in(
@@ -88,6 +137,13 @@ fn finals_parser_prefers_bulletin_b_and_preserves_prediction_gaps() {
             .as_milliarcseconds(),
         -18.637,
         epsilon = 1.0e-12
+    );
+    assert!(first.polar_motion_x_standard_uncertainty().is_none());
+    assert!(first.ut1_minus_utc_standard_uncertainty().is_none());
+    assert!(
+        first
+            .celestial_pole_offset_x_standard_uncertainty()
+            .is_none()
     );
 
     let last = data.records()[data.records().len() - 1];
@@ -201,6 +257,142 @@ fn finals_parser_prefers_bulletin_b_and_preserves_prediction_gaps() {
         .earth_attitude_at(attitude_samples[0].epoch())
         .unwrap();
     assert_eq!(solution.observations(), attitude);
+    let site = Earth::wgs84()
+        .fixed_site(
+            "missing-LOD fallback",
+            GeodeticPosition::new(
+                GeodeticLongitude::try_from_degrees(121.458_930).unwrap(),
+                GeodeticLatitude::try_from_degrees(31.340_370).unwrap(),
+                EllipsoidalHeight::from_metres(15.0).unwrap(),
+            ),
+        )
+        .unwrap();
+    let topocentric = site
+        .topocentric_frame_with_nominal_rotation_at(
+            attitude_samples[0].epoch(),
+            &Frames::new(&attitude_time),
+        )
+        .unwrap();
+    assert_eq!(
+        topocentric.velocity_model(),
+        SiteVelocityModel::IersNominalEarthRotation
+    );
+    let inertial_speed = topocentric
+        .observer_state()
+        .velocity()
+        .magnitude()
+        .unwrap()
+        .as_metres_per_second();
+    assert!((300.0..400.0).contains(&inertial_speed));
+    let gcrs_state = topocentric.observer_state();
+    let cirs_position = solution
+        .gcrs_to_cirs()
+        .apply_vector(gcrs_state.position().position())
+        .unwrap()
+        .components();
+    let cirs_velocity = solution
+        .gcrs_to_cirs()
+        .apply_vector(gcrs_state.velocity())
+        .unwrap()
+        .components();
+    let observations = solution.observations();
+    let geodetic = site.geodetic_position();
+    let mut sofa_pv = [[0.0; 3]; 2];
+    sofars::astro::pvtob(
+        geodetic.longitude().as_radians(),
+        geodetic.latitude().as_radians(),
+        geodetic.height().as_metres(),
+        observations.polar_motion_x().as_angle().as_radians(),
+        observations.polar_motion_y().as_angle().as_radians(),
+        solution.tio_locator().as_radians(),
+        solution.earth_rotation_angle().as_radians(),
+        &mut sofa_pv,
+    );
+    for axis in 0..3 {
+        assert_abs_diff_eq!(
+            cirs_position[axis].as_metres(),
+            sofa_pv[0][axis],
+            epsilon = 2.0e-8
+        );
+        assert_abs_diff_eq!(
+            cirs_velocity[axis].as_metres_per_second(),
+            sofa_pv[1][axis],
+            epsilon = 1.0e-5
+        );
+    }
+}
+#[test]
+fn finals_prediction_uncertainties_survive_attitude_interpolation() {
+    let data = IersFinals2000A::parse(FINALS_2000_A).unwrap();
+    let time = TimeContext::builtin();
+    let start = ModifiedJulianDate::<Utc>::from_parts(61_261.0, 0.0).unwrap();
+    let end = ModifiedJulianDate::<Utc>::from_parts(61_262.0, 0.0).unwrap();
+    let samples = data
+        .try_earth_attitude_samples_in(
+            &time,
+            start,
+            end,
+            EarthOrientationAcceptance::IncludePredicted,
+        )
+        .unwrap();
+    assert_eq!(samples.len(), 2);
+    let expires = samples[1]
+        .epoch()
+        .checked_add(Duration::from_days(1).unwrap())
+        .unwrap();
+    let table =
+        EarthAttitudeTable::new(&samples, "finals prediction uncertainty", expires).unwrap();
+    let time = time.with_earth_attitude(table);
+    let midpoint = samples[0]
+        .epoch()
+        .checked_add(Duration::from_seconds(43_200).unwrap())
+        .unwrap();
+    let attitude = time.earth_attitude_at(midpoint).unwrap();
+    let uncertainties = attitude.standard_uncertainties();
+
+    assert_eq!(
+        attitude.standard_uncertainty_origin(),
+        Some(UncertaintyOrigin::CorrelationAgnosticLinearInterpolation)
+    );
+    assert_abs_diff_eq!(
+        uncertainties
+            .ut1_minus_utc()
+            .unwrap()
+            .value()
+            .as_seconds_f64(),
+        0.000_352_45,
+        epsilon = 5.0e-10
+    );
+    assert_abs_diff_eq!(
+        uncertainties.polar_motion_x().unwrap().value().as_degrees() * 3_600.0,
+        0.001_247,
+        epsilon = 1.0e-15
+    );
+    assert_abs_diff_eq!(
+        uncertainties.polar_motion_y().unwrap().value().as_degrees() * 3_600.0,
+        0.001_062_5,
+        epsilon = 1.0e-15
+    );
+    assert_abs_diff_eq!(
+        uncertainties
+            .celestial_pole_offset_x()
+            .unwrap()
+            .value()
+            .as_degrees()
+            * 3_600_000.0,
+        0.128,
+        epsilon = 1.0e-12
+    );
+    assert_abs_diff_eq!(
+        uncertainties
+            .celestial_pole_offset_y()
+            .unwrap()
+            .value()
+            .as_degrees()
+            * 3_600_000.0,
+        0.160,
+        epsilon = 1.0e-12
+    );
 }
 
 #[test]

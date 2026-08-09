@@ -196,6 +196,8 @@ hyastro 以 Hifitime、SOFA 系算法和 ANISE 等经过核验的后端为数值
 - **TIME-CAL-004** 支持负年份和公元前日期；解析格式必须明确年份位数与符号。
 - **TIME-CAL-005** 支持日期加减日、月、年；月/年运算必须有月底夹取或报错策略。
 - **TIME-CAL-006** 支持 Gregorian/Julian 与日序、JD/MJD/Rata Die 的转换。
+- **TIME-CAL-007** 月数差必须区分跨越的历月边界、已完整经过的历月，以及“完整历月数 + 剩余整日”分解。
+- **TIME-CAL-008** 历法跨度与物理时长使用不同类型；历月/历年运算必须指定历法、分量应用顺序和无对应月底日期的调整策略。
 
 ### 6.2.2 连续时间表示
 
@@ -233,6 +235,11 @@ hyastro 以 Hifitime、SOFA 系算法和 ANISE 等经过核验的后端为数值
 - **TIME-ROT-003** 计算必须区分 UT1 输入与 TT 输入，类型阻止互换。
 - **TIME-ROT-004** 支持 ERA/恒星时的角速度和时间反解，用于中天事件初值。
 - **TIME-ROT-005** 地方恒星时必须明确站点经度符号和参考子午线。
+- **TIME-SOLAR-001** 格林尼治平太阳时以 UT1 表示；不得用 UTC、固定偏移或时区时钟替代。
+- **TIME-SOLAR-002** 真太阳时定义为真太阳当地时角加 12 小时；太阳视赤经必须标明日期真赤道与真分点轴。
+- **TIME-SOLAR-003** 时差定义为真太阳时减平太阳时，正值表示真太阳领先；结果使用独立强类型并保留符号约定。
+- **TIME-SOLAR-004** 支持以东经为正的地方平太阳时和地方真太阳时；同一经度偏移同时作用于两者，时差保持不变。
+- **TIME-SOLAR-005** 高精度工作流组合真实历表太阳视位置、收敛光行时、UT1 和 IAU 2006/2000A GAST，并保留模型与数值诊断。
 
 ### 6.2.6 时区与民用时间
 
@@ -460,6 +467,8 @@ hyastro 以 Hifitime、SOFA 系算法和 ANISE 等经过核验的后端为数值
 - **EVT-CFG-005** 支持黄道升/降交点、赤道穿越、轨道平面交点和纬度极值。
 - **EVT-CFG-006** 支持照亮比例、相位角、视星等和角直径的阈值/极值。
 - **EVT-CFG-007** 月相命名和照亮比例必须区分增长/亏缺方向。
+- **EVT-CFG-008** 支持回归年/分点年、恒星年、近点年、交点年以及朔望月、恒星月、回归月、近点月、交点月的明确事件判据和区间统计。
+- **EVT-CFG-009** 事件测得的天文周期必须保留首尾事件、实际时长、参考系/分点、历表、数值证据和覆盖范围；模型平均周期必须保留求值历元、模型和适用范围，文献平均值不得替代实际事件求解。
 
 ### 6.8.4 掩星、凌和食
 
@@ -670,6 +679,7 @@ hyastro 以 Hifitime、SOFA 系算法和 ANISE 等经过核验的后端为数值
 | UTC/TAI/TT/UT1/TCG/TCB/TDB | TIME-SCL |
 | 闰秒、TAI−UTC、UT1−UTC、Delta T、GPS、Unix | TIME-REP、TIME-DAT |
 | 恒星时与 ERA | TIME-ROT |
+| 平太阳时、真太阳时与时差 | TIME-SOLAR |
 | IAU 2006 + IAU 2000A/B、EOP | EOP-MOD、EOP-XFM |
 | ICRS/BCRS/GCRS/CIRS/TIRS/ITRS/FK4/FK5/Galactic/Ecliptic/Topocentric/Horizontal | FRM-SYS |
 | Gaia DR3、DE BSP 解析 | CAT-DAT、EPH-SPK |
@@ -689,5 +699,7 @@ hyastro 以 Hifitime、SOFA 系算法和 ANISE 等经过核验的后端为数值
 - [NAIF SPK Required Reading](https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/req/spk.html)：SPK 文件、段优先级、状态和光行时语义。
 - [IANA Time Zone Database](https://www.iana.org/time-zones)：可选民用时区数据。
 - [IERS Earth Orientation Centre](https://www.iers.org/IERS/EN/DataProducts/EarthOrientationData/eop.html)：EOP 产品入口。
+- [USNO Equation of Time](https://aa.usno.navy.mil/faq/eqtime)：真太阳时、平太阳时及时差的定义与符号约定。
+- [USNO Geocentric Positions](https://aa.usno.navy.mil/data/geocentric)：日期真赤道与真分点太阳视赤经及时差的独立参考表。
 
 具体依赖能力、许可证和版本结论见 `docs/LIBRARY_RESEARCH.md`；编码和测试约束见 `docs/CODE_STANDARDS.md`。

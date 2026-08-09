@@ -29,10 +29,12 @@ pub enum Error {
         maximum_nanoseconds: i128,
     },
 
-    /// The angular event tolerance was zero, negative, or too large.
-    #[error("solar-term longitude tolerance must be in (0, {maximum_radians}] rad, got {radians}")]
-    InvalidLongitudeTolerance {
-        /// Rejected angular tolerance.
+    /// An angular event tolerance was zero, negative, or too large.
+    #[error("{field} must be in (0, {maximum_radians}] rad, got {radians}")]
+    InvalidAngularTolerance {
+        /// Name of the invalid angular tolerance.
+        field: &'static str,
+        /// Rejected tolerance in radians.
         radians: f64,
         /// Inclusive maximum accepted tolerance.
         maximum_radians: f64,
@@ -47,11 +49,36 @@ pub enum Error {
         value: u32,
     },
 
-    /// The explicit search evaluation budget was exhausted.
-    #[error("solar-term search exhausted its {maximum} evaluation budget")]
+    /// The explicit astronomical-event evaluation budget was exhausted.
+    #[error("astronomical-event search exhausted its {maximum} evaluation budget")]
     EvaluationLimitExceeded {
         /// Maximum permitted astrometric evaluations.
         maximum: u32,
+    },
+
+    /// A bounded extremum refinement exhausted its iteration budget.
+    #[error("bounded extremum search did not converge within {iterations} iterations")]
+    ExtremumSearchDidNotConverge {
+        /// Maximum refinement iterations attempted.
+        iterations: u32,
+    },
+
+    /// A relative event query named one body as both target and reference.
+    #[error("relative event target and reference are both {body}")]
+    IdenticalEventBodies {
+        /// Rejected target and reference body.
+        body: crate::ephem::CelestialBody,
+    },
+
+    /// A refined angular event did not meet its requested residual.
+    #[error("{event} residual {residual_radians} rad exceeds tolerance {tolerance_radians} rad")]
+    AngularResidualExceeded {
+        /// Stable event description.
+        event: &'static str,
+        /// Final absolute angular residual.
+        residual_radians: f64,
+        /// Required maximum residual.
+        tolerance_radians: f64,
     },
 
     /// Consecutive solar samples did not form the required increasing longitude sequence.
@@ -62,6 +89,21 @@ pub enum Error {
         /// Earlier wrapped apparent longitude.
         previous_radians: f64,
         /// Later wrapped apparent longitude.
+        current_radians: f64,
+        /// Earlier sample epoch as TAI nanoseconds since 1900-01-01 TAI.
+        previous_tai_nanoseconds: i128,
+        /// Later sample epoch in the same representation.
+        current_tai_nanoseconds: i128,
+    },
+
+    /// Consecutive samples did not form the required increasing lunar elongation sequence.
+    #[error(
+        "apparent lunar-minus-solar longitude did not increase from {previous_radians} to {current_radians} rad between {previous_tai_nanoseconds} and {current_tai_nanoseconds} TAI ns"
+    )]
+    MoonElongationNotIncreasing {
+        /// Earlier wrapped apparent longitude difference.
+        previous_radians: f64,
+        /// Later wrapped apparent longitude difference.
         current_radians: f64,
         /// Earlier sample epoch as TAI nanoseconds since 1900-01-01 TAI.
         previous_tai_nanoseconds: i128,
@@ -104,5 +146,37 @@ pub enum Error {
         expected: &'static str,
         /// Actual English solar-term name.
         actual: &'static str,
+    },
+
+    /// Consecutive geometric longitude samples did not advance on the required branch.
+    #[error(
+        "cycle angle did not increase from {previous_radians} to {current_radians} rad between {previous_tai_nanoseconds} and {current_tai_nanoseconds} TAI ns"
+    )]
+    CycleAngleNotIncreasing {
+        /// Earlier wrapped angle.
+        previous_radians: f64,
+        /// Later wrapped angle.
+        current_radians: f64,
+        /// Earlier sample epoch as TAI nanoseconds since 1900-01-01 TAI.
+        previous_tai_nanoseconds: i128,
+        /// Later sample epoch in the same representation.
+        current_tai_nanoseconds: i128,
+    },
+
+    /// Cycle statistics were requested without a complete measured cycle.
+    #[error("cycle statistics require at least one complete measured cycle")]
+    EmptyCycleSample,
+
+    /// A numerical mean-cycle model was evaluated outside its recommended epoch range.
+    #[error("{model} is recommended for Julian epochs [{start}, {end}], got J{epoch}")]
+    ModelEpochOutsideValidity {
+        /// Stable numerical-model identifier.
+        model: &'static str,
+        /// Rejected Julian epoch.
+        epoch: f64,
+        /// Inclusive first recommended Julian epoch.
+        start: f64,
+        /// Inclusive last recommended Julian epoch.
+        end: f64,
     },
 }

@@ -5,7 +5,7 @@ use hyastro::time::{
 };
 
 const C04: &str = include_str!("../data/eop/eop-20u24-c04-1962-now-2026-08-06.txt");
-const FINALS_2000_A: &str = include_str!("../data/eop/finals2000a-2026-08-06.all");
+const FINALS_2000_A: &str = include_str!("../data/eop/finals2000a-2026-08-09.all");
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let c04 = IersC04::parse(C04)?;

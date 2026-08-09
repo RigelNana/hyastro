@@ -91,7 +91,6 @@ impl Length {
     /// Number of metres in one parsec.
     pub const METRES_PER_PARSEC: f64 = METRES_PER_PARSEC;
 
-    #[cfg(feature = "std")]
     pub(crate) const fn from_finite(value: f64) -> Self {
         Self(value)
     }

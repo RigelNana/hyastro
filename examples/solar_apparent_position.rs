@@ -3,7 +3,6 @@ use std::io::{Error, ErrorKind};
 use hyastro::{
     astro::{Astrometry, ReceptionLightTimeOptions},
     ephem::{Ephemeris, KernelManifest},
-    frame::Frames,
     time::{DateTime, Gregorian, TimeContext, Utc},
 };
 
@@ -21,12 +20,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         2024, 3, 20, 3, 6, 0, 0,
     )?)?;
     let astrometry = Astrometry::new(&time, &ephemeris);
-    let apparent =
-        astrometry.solar_apparent_ecliptic(epoch, ReceptionLightTimeOptions::standard())?;
-
-    let celestial = Frames::new(&time).celestial_orientation_at(epoch)?;
-    let gcrs = celestial.gcrs_from_true_ecliptic(apparent.coordinates())?;
-    let equatorial = celestial.true_equatorial(gcrs)?.coordinates();
+    let apparent = astrometry.solar_apparent_place(epoch, ReceptionLightTimeOptions::standard())?;
+    let equatorial = apparent.true_equatorial().coordinates();
 
     println!("epoch                      = 2024-03-20T03:06:00 UTC");
     println!(

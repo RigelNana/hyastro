@@ -76,6 +76,23 @@ impl CelestialBody {
         }
     }
 
+    /// Returns whether this identity denotes a body with a physical surface.
+    pub const fn has_physical_surface(self) -> bool {
+        !matches!(
+            self,
+            Self::SolarSystemBarycenter
+                | Self::MercuryBarycenter
+                | Self::VenusBarycenter
+                | Self::EarthMoonBarycenter
+                | Self::MarsBarycenter
+                | Self::JupiterBarycenter
+                | Self::SaturnBarycenter
+                | Self::UranusBarycenter
+                | Self::NeptuneBarycenter
+                | Self::PlutoBarycenter
+        )
+    }
+
     #[cfg(feature = "anise")]
     pub(crate) const fn naif_id(self) -> i32 {
         match self {

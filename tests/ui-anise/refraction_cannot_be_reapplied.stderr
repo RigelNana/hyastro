@@ -1,0 +1,11 @@
+error[E0599]: no method named `apply_refraction` found for struct `ObservedPlace<S>` in the current scope
+  --> tests/ui-anise/refraction_cannot_be_reapplied.rs:10:22
+   |
+10 |     let _ = observed.apply_refraction(conditions);
+   |                      ^^^^^^^^^^^^^^^^
+   |
+help: there is a method `refraction` with a similar name, but with different arguments
+  --> src/astro/astrometry.rs
+   |
+   |     pub const fn refraction(self) -> RefractionCorrection {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

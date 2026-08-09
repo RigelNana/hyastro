@@ -23,6 +23,7 @@ pub struct CelestialOrientationSolution<S: TimeScale> {
     gcrs_to_mean_equator: Rotation<Gcrs, MeanEquatorEquinoxOfDate>,
     gcrs_to_true_equator: Rotation<Gcrs, TrueEquatorEquinoxOfDate>,
     icrs_to_mean_ecliptic: Rotation<Icrs, MeanEclipticEquinoxOfDate>,
+    gcrs_to_mean_ecliptic: Rotation<Gcrs, MeanEclipticEquinoxOfDate>,
     icrs_to_true_ecliptic: Rotation<Icrs, TrueEclipticEquinoxOfDate>,
     gcrs_to_true_ecliptic: Rotation<Gcrs, TrueEclipticEquinoxOfDate>,
 }
@@ -31,6 +32,8 @@ impl<S: TimeScale> CelestialOrientationSolution<S> {
     pub(super) fn at(epoch: Instant<S>, terrestrial_time: JulianDate<Tt>) -> Result<Self, Error> {
         let precession_nutation = PrecessionNutation::at(terrestrial_time)?;
         let (tt_first, tt_second) = terrestrial_time.parts();
+        let mean_ecliptic_matrix =
+            Matrix3::try_from_rows(sofars::coords::ecm06(tt_first, tt_second))?;
         let mut true_ecliptic_matrix = precession_nutation.bias_precession_nutation_matrix().rows();
         sofars::vm::rx(
             precession_nutation.true_obliquity().as_radians(),
@@ -46,9 +49,8 @@ impl<S: TimeScale> CelestialOrientationSolution<S> {
             gcrs_to_true_equator: Self::rotation_from_matrix(
                 precession_nutation.bias_precession_nutation_matrix(),
             )?,
-            icrs_to_mean_ecliptic: Self::rotation_from_matrix(Matrix3::try_from_rows(
-                sofars::coords::ecm06(tt_first, tt_second),
-            )?)?,
+            icrs_to_mean_ecliptic: Self::rotation_from_matrix(mean_ecliptic_matrix)?,
+            gcrs_to_mean_ecliptic: Self::rotation_from_matrix(mean_ecliptic_matrix)?,
             icrs_to_true_ecliptic: Self::rotation_from_matrix(Matrix3::try_from_rows(
                 true_ecliptic_matrix,
             )?)?,
@@ -164,6 +166,37 @@ impl<S: TimeScale> CelestialOrientationSolution<S> {
         EquatorialDirection::from_direction(direction).map_err(Error::from)
     }
 
+    /// Converts a GCRS proper direction to IAU 2006 mean ecliptic coordinates of date.
+    ///
+    /// This is the frame-rotation stage used after geocentric aberration.
+    /// The method does not itself apply light-time, aberration, parallax, or
+    /// light-deflection corrections.
+    pub fn mean_ecliptic_from_gcrs(
+        self,
+        source: EquatorialDirection<Gcrs>,
+    ) -> Result<EclipticDirectionAt<MeanEclipticEquinoxOfDate, S>, Error> {
+        let direction = self
+            .gcrs_to_mean_ecliptic
+            .apply_direction(source.to_direction()?)?;
+        Ok(EclipticDirectionAt::new(
+            self.epoch,
+            EclipticDirection::from_direction(direction)?,
+        ))
+    }
+
+    /// Converts mean ecliptic coordinates of date back to a GCRS proper direction.
+    pub fn gcrs_from_mean_ecliptic(
+        self,
+        source: EclipticDirectionAt<MeanEclipticEquinoxOfDate, S>,
+    ) -> Result<EquatorialDirection<Gcrs>, Error> {
+        self.ensure_epoch(source.epoch())?;
+        let direction = self
+            .gcrs_to_mean_ecliptic
+            .inverse()
+            .apply_direction(source.coordinates().to_direction()?)?;
+        EquatorialDirection::from_direction(direction).map_err(Error::from)
+    }
+
     /// Converts an ICRS direction to conventional true ecliptic and equinox of date coordinates.
     ///
     /// The axes include IAU 2006 frame bias and precession, IAU 2000A
@@ -266,6 +299,7 @@ impl<S: TimeScale> fmt::Debug for CelestialOrientationSolution<S> {
             .field("gcrs_to_mean_equator", &self.gcrs_to_mean_equator)
             .field("gcrs_to_true_equator", &self.gcrs_to_true_equator)
             .field("icrs_to_mean_ecliptic", &self.icrs_to_mean_ecliptic)
+            .field("gcrs_to_mean_ecliptic", &self.gcrs_to_mean_ecliptic)
             .field("icrs_to_true_ecliptic", &self.icrs_to_true_ecliptic)
             .field("gcrs_to_true_ecliptic", &self.gcrs_to_true_ecliptic)
             .finish()

@@ -3,7 +3,7 @@
 - 文档状态：依赖基线定稿（调研版）
 - 调研基线：2026-08-05；crates.io 元数据查询日期同为 2026-08-05
 - 配套文档：`docs/PRD.md`、`docs/FEATURES.md`、`docs/CODE_STANDARDS.md`、`docs/LIBRARY_RESEARCH.md`
-- 实现进展：`Cargo.toml` 已锁定 `sofars = 0.6.1`，由默认 `std` feature 启用，用于 IAU 2006/2000A `GCRS → CIRS → TIRS → ITRS` 地球定向链、IAU 2006 日期平/真赤道与日期平黄道、Hipparcos ICRS↔IAU Galactic 转换、Fukushima (2006) 测地坐标与 ITRS 地心直角坐标双向转换，以及 Fairhead–Bretagnon (1990) 完整地心 `TDB−TT` 解析模型；`hifitime` 保持可选模型 adapter。库内已实现 IERS EOP 20u24 C04 与 finals2000A 解析器，但不引入额外 EOP crate。其余条目仍是依赖决策基线，不代表均已接入。
+- 实现进展：`Cargo.toml` 已锁定 `sofars = 0.6.1`，由默认 `std` feature 启用，用于 IAU 2006/2000A `GCRS → CIRS → TIRS → ITRS` 地球定向链、IAU 2006 日期平/真赤道与日期平黄道、Hipparcos ICRS↔IAU Galactic 转换、Fukushima (2006) 测地坐标与 ITRS 地心直角坐标双向转换、Fairhead–Bretagnon (1990) 完整地心 `TDB−TT` 解析模型，以及 `refco`/`atioq` 站心大气折射链；`hifitime` 保持可选模型 adapter。库内已实现 IERS EOP 20u24 C04 与 finals2000A 解析器，但不联网获取数据。
 
 ## 0. 方法与约定
 
@@ -51,9 +51,9 @@
 | vsop87 | **可选 feature `vsop87`** | 太阳/行星低精度历表后端（P1） |
 | sha2 | **当前不采用** | 历表加载不要求或校验 SHA-256；内核路径、文件长度和冻结加载顺序保持显式 |
 | flate2（miniz_oxide 后端） | **可选 feature `compression`** | gzip/deflate（P1，纯 Rust） |
-| fitsrs =0.4.2 | **可选 feature `fits`** | CDS 纯 Rust FITS 多 HDU、图像和基础 BINTABLE 读取（P2） |
+| fitsrs =0.4.1 | **可选 feature `fits`** | CDS 纯 Rust FITS 多 HDU、图像和基础 BINTABLE 读取（P2） |
 | votable（CDS） | **可选 feature `votable`** | VOTable 读/写（P2） |
-| arrow + parquet | **可选 feature `parquet`** | Gaia parquet/大星表列式访问（P2，重依赖） |
+| arrow + parquet | **可选 feature `parquet`** | 自转换 Parquet 与大星表列式访问（P2，重依赖） |
 | cdshealpix | **可选 feature `healpix`** | HEALPix 索引（P2） |
 | moc（CDS） | **可选 feature `moc`** | 多阶覆盖图（P2，依赖 healpix） |
 | sgp4 | **可选 feature `sgp4`** | SGP4/TLE 传播（P2） |
@@ -301,7 +301,7 @@ ANISE 0.10.4 满足"生产级 SPICE/DAF/SPK/PCK/参考系后端"定位：纯 Rus
 
 #### 3.2.5 sofars —— **确定采用**（P0）
 
-- 用途：IAU SOFA 纯 Rust 数值内核：时间尺度（21 函数）、地球定向（ERA/GMST/GAST/岁差/章动/极移，`erst`+`pnp` 全族）、IAU 2006 `ecm06/eqec06/eceq06` 日期平/真黄道、`astro::ab` 相对论周年光行差、Hipparcos `icrs2g/g2icrs` 规范银道转换、FK4/FK5、天体测量（`astro`）、历表（epv00/moon98/plan94）、投影、向量矩阵（`vm`）。ANISE 自身也硬依赖 sofars 0.6.1（`ref/anise/anise/Cargo.toml`，用于 `orientations/dynamic.rs` 的 IAU1976/2000/2006 岁差与 1980/2000A/2000B/2006A 章动）——hyastro 与 ANISE 使用同一数值实现，无重复内核。
+- 用途：IAU SOFA 纯 Rust 数值内核：时间尺度（21 函数）、地球定向（ERA/GMST/GAST/岁差/章动/极移，`erst`+`pnp` 全族）、IAU 2006 `ecm06/eqec06/eceq06` 日期平/真黄道、`astro::ab` 相对论周年光行差、`pmpx` 星表源站心方向、`starpv` / `pvstar` 六参数与质心状态互转、`starpm` 空间运动历元传播、Hipparcos `icrs2g/g2icrs` 规范银道转换、FK4/FK5、历表（epv00/moon98/plan94）、投影和向量矩阵（`vm`）。ANISE 自身也硬依赖 sofars 0.6.1（`ref/anise/anise/Cargo.toml`，用于 `orientations/dynamic.rs` 的 IAU1976/2000/2006 岁差与 1980/2000A/2000B/2006A 章动）——hyastro 与 ANISE 使用同一数值实现，无重复内核。
 - 版本约束：`sofars = "=0.6.1"`（crates.io 最新 0.6.1 = 本地 HEAD 版本；0.x 有破坏性 API 变更历史——0.5.0 将 pnp API 从可变引用参数改为返回值，`ref/sofars/CHANGELOG.md`——故用精确版本锁定，升级走显式流程）。
 - features：无。默认：启用（P0）。
 - no_std：**不支持**（edition 2024、无 no_std 特性）——hyastro no_std 内核不得依赖 sofars，相关算法在 `no_std` 内核中自研或经特征门控（`std` 路径用 sofars 数值核对）。
@@ -327,11 +327,11 @@ ANISE 0.10.4 满足"生产级 SPICE/DAF/SPK/PCK/参考系后端"定位：纯 Rus
 
 #### 3.3.3 csv —— **可选 feature `catalog-csv`**（P1）
 
-- 用途：Gaia DR3 `gaia_source` CSV 流式读取（CAT-DAT-005）、Hipparcos/Tycho CSV 适配器、用户自定义列映射。`csv` 支持流式 `Reader`（逐行、限定内存）与 serde derive 反序列化。
+- 用途：Gaia DR3 `gaia_source` CSV 与官方 ECSV(gzip) 数据体的流式读取（CAT-DAT-005）、Hipparcos/Tycho CSV 适配器和用户自定义列映射。`csv` 支持有界内存逐行读取、serde derive 反序列化，并可用 `ReaderBuilder::comment(Some(b'#'))` 跳过 ECSV 的 YAML 注释头；若要校验 ECSV 中的单位和数据类型，仍须由 hyastro 的薄适配层解析该头。
 - 版本约束：`csv = "1"`（最新 1.4.0，`rust-version=1.73`）。features：无。默认：关闭。
-- no_std：不支持（std io）。unsafe/FFI：无。许可：Unlicense OR MIT。平台：全平台。
+- no_std：不支持（std io；底层 `csv-core` 支持 no_std）。无 FFI；源码有 4 处非 FFI `unsafe`，均为已验证 UTF-8 的零拷贝快速路径。许可：Unlicense OR MIT。平台：全平台。
 - 为何不自己实现：CSV 状态机（引号/转义/CRLF/BOM/非 UTF-8 字段）成熟且易错。
-- 替代项：手写 `split(',')`（错误：引号内逗号、多行字段）；`csv-core`（更底层，若需极简）。理由：csv 是 BurntSushi 维护的标准实现，流式 API 直接满足 CAT-DAT-008 内存限制要求。
+- 替代项：手写 `split(',')`（错误：引号内逗号、多行字段）；`csv-core`（更底层，若需极简）。Rust 生态当前没有完整 ECSV crate；Gaia ECSV 采用“YAML 注释头薄适配 + `csv` 数据体”的组合。
 
 #### 3.3.4 vsop87 —— **可选 feature `vsop87`**（P1）
 
@@ -352,35 +352,35 @@ ANISE 0.10.4 满足"生产级 SPICE/DAF/SPK/PCK/参考系后端"定位：纯 Rus
 #### 3.3.6 flate2 —— **可选 feature `compression`**（P1）
 
 - 用途：gzip/deflate 压缩（星表分发、FITS 压缩扩展、缓存格式）。**只用纯 Rust 后端**：`flate2 = { version = "1", default-features = false, features = ["rust_backend"] }`（最新 1.1.9，`rust-version=1.67`；`rust_backend` = miniz_oxide，纯 Rust）。
-- 默认：关闭。no_std：miniz_oxide 支持 no_std（`flate2` 的 rust_backend 经 `miniz_oxide` 在 no_std 下可用 [推断]）。unsafe/FFI：无（rust_backend 路径；`zlib`/`zlib-ng`/`zlib-rs` 后端为 FFI，不采用）。许可：MIT OR Apache-2.0（miniz_oxide：MIT OR Zlib OR Apache-2.0）。平台：全平台。
+- 默认：关闭。no_std：miniz_oxide 支持 no_std（`flate2` 自身仍使用 std I/O）。所选 `rust_backend` 无 FFI；`zlib` / `zlib-ng` 后端使用 C，`zlib-rs` 是另一个纯 Rust 后端但本项目不选。许可：MIT OR Apache-2.0（miniz_oxide：MIT OR Zlib OR Apache-2.0）。平台：全平台。
 - 为何不自己实现：DEFLATE 编解码器是成熟算法，实现正确性成本高。
 - 替代项：`gzip`（旧）、`libflate`（纯 Rust 但慢）、`zlib-rs`（新兴，性能好）。理由：flate2 + miniz_oxide 是生态默认的纯 Rust 组合；默认构建仍零额外依赖（feature 关闭）。
 
-#### 3.3.7 FITS 方案：fitsrs / fitsio —— **可选 feature `fits`**（P2），采用 fitsrs =0.4.2
+#### 3.3.7 FITS 方案：fitsrs / fitsio —— **可选 feature `fits`**（P2），采用 fitsrs =0.4.1
 
-- 需求：CAT-DAT-005/006 FITS 星表读取、FRM-BDY 形状模型和多 HDU 流式访问。
-- **fitsrs（CDS，纯 Rust）**：官方仓库 `cds-astro/fitsrs`，crate 名为 `fitsrs`，版本 0.4.2，许可 `Apache-2.0 OR MIT`，edition 2018。官方 README 确认支持多 HDU、图像、基础 BINTABLE、流式/seek 访问和部分 tiled-image compression；不提供写入器，ASCII 表只暴露原始字节。
-- 版本约束：`fitsrs = "=0.4.2"`；feature `fits = ["dep:fitsrs"]`，默认关闭。接入验收必须用 Gaia/FITS BINTABLE 固定样本验证列类型、变长数组、空值、缩放、字节序和截断输入。
-- no_std：不支持；unsafe/FFI：无；许可：Apache-2.0 OR MIT；MSRV：未声明；平台：std 平台及 WASM 纯 Rust路径。
+- 需求：CAT-DAT-005/006 的 TAP FITS 星表结果、FRM-BDY 形状模型和多 HDU 流式访问。Gaia DR3 官方 bulk 本身是 ECSV(gzip)，不是 FITS 分片。
+- **fitsrs（CDS，纯 Rust）**：官方仓库 `cds-astro/fitsrs`，crates.io 最新发布版 0.4.1，许可 `Apache-2.0 OR MIT`，edition 2018。支持多 HDU、图像、基础 BINTABLE、流式/seek 访问和部分 tiled-image compression；不提供写入器，ASCII 表只暴露原始字节。其 BINTABLE 支持主要为瓦片压缩图像加入，不能未经真实 Gaia TAP FITS 样本验证便声称完整支持星表。
+- 版本约束：`fitsrs = "=0.4.1"`；仓库中的 0.4.2 尚未发布且含 git 依赖，不能写入 crates.io 版本约束。feature `fits = ["dep:fitsrs"]`，默认关闭。接入验收必须用 Gaia/FITS BINTABLE 固定样本验证列类型、变长数组、空值、缩放、字节序和截断输入。
+- no_std：不支持；活动源码 0 unsafe、无 FFI；许可：Apache-2.0 OR MIT；MSRV：未声明；平台：std 平台及 WASM 纯 Rust 路径。
 - **名称陷阱**：`fitrs` 是另一个名称相近但无关的 crate，不得误写为 hyastro 依赖。
 - **fitsio**：基于 cfitsio 的成熟绑定，但需要 C 工具链并扩大 FFI 审计面；当前生产基线明确不采用。若未来要求完整 FITS 写入或 fitsrs 未覆盖的扩展，必须另立依赖决策，不得在 `fits` feature 中静默切换实现。
 - 为何不自己实现：FITS 卡片、HDU、BINTABLE、填充、字节序和压缩约定复杂；采用 CDS 解析器并由 hyastro 适配层补充领域列映射。
 
 #### 3.3.8 VOTable 方案：votable（CDS）—— **可选 feature `votable`**（P2）
 
-- 需求：CAT-DAT-005 VOTable 流式适配（Gaia 官方也发布 VOTable/ECSV 服务）。
-- crate：`votable` 0.7.0（crates.io `repository=https://github.com/cds-astro/cds-votable-rust`，即 CDS 官方；Apache-2.0 OR MIT；edition 2024）。能力：VOTable 1.4 读/写，XML-TABLEDATA/BINARY/BINARY2 与 JSON/YAML/TOML 互转、MIVOT；基于 serde + quick-xml（流式）。
-- 版本约束：`votable = "0.7"`。默认：关闭。no_std：不支持。unsafe/FFI：无（quick-xml 纯 Rust）。
+- 需求：CAT-DAT-005 VOTable 流式适配；Gaia TAP 的默认与 gzip 输出均支持 VOTable。
+- crate：`votable` 0.7.0（crates.io `repository=https://github.com/cds-astro/cds-votable-rust`，即 CDS 官方；Apache-2.0 OR MIT；edition 2024）。支持 VOTable 1.0–1.6 标签（当前 IVOA Recommendation 为 1.5），XML-TABLEDATA/BINARY/BINARY2 与 JSON/YAML/TOML 互转、MIVOT，以及 StAX 流式读取。
+- 版本约束：`votable = "0.7"`。默认：关闭。no_std：不支持；无 FFI，但源码有约 19 处 UTF-8 快速路径的非 FFI `unsafe`。
 - 为何不自己实现：VOTable 协议（FIELD/DATA/BINARY 编解码、arraysize/precision）繁琐。
 - 替代项：`quick-xml` 手写（重复造轮子）；`votable` 的竞品暂无。**注意**：CDS README 自述 "not yet as clean and documented as I would like"、API 可能调整（0.x）——锁版本并适配层薄；接入时机为 P2。
 - 决策：P2 可选 feature；若 P2 评审认为 API 不稳定，可降级为"内部验证工具"或推迟（保持 `votable` feature 名占位？否——不设占位；当期结论：可选 feature，实施时以 0.7 锁定）。
 
 #### 3.3.9 Arrow / Parquet 方案：arrow + parquet —— **可选 feature `parquet`**（P1/P2）
 
-- 需求：Gaia DR3 官方 parquet 分片（CAT-DAT-004/005 大规模星表查询、列式访问、跨匹配）。
-- 版本：arrow 59.1.0 / parquet 59.1.0（Apache-2.0，`rust-version=1.85`，edition 2024）；与 nyx-space 的 arrow/parquet 59 同代（`ref/nyx-space` 依赖 arrow/parquet 59 [观察]），与 ANISE dev-deps 的 polars 0.51（基于 arrow 59）对齐。
-- 版本约束：`arrow = "59"`、`parquet = "59"`；`parquet` 需选 `arrow` 特性（`parquet/arrow`）读列式。默认：关闭。
-- no_std：不支持。unsafe/FFI：arrow 内部存在少量 unsafe（列缓冲）；无外部 FFI。许可：Apache-2.0。平台：全平台。
+- 需求：把 Gaia 官方 ECSV/TAP 结果自行转换为 Parquet，支持大规模列式访问、批次传播和交叉匹配。ESA bulk 与 TAP capabilities 均不提供官方 Parquet；第三方 Parquet 数据集必须记录转换来源和校验信息。
+- 版本：arrow 59.2.0 / parquet 59.2.0（Apache-2.0，`rust-version=1.85`，edition 2024）；与 nyx-space 的 arrow/parquet 59 同代。
+- 版本约束：`arrow = "59"`、`parquet = "59"`；`parquet` 的 `arrow` feature 提供批次迭代读取。默认：关闭。
+- no_std：不支持。arrow/parquet 内部存在非 FFI unsafe；parquet 默认 codec 集包含 `zstd`，会经 `zstd-sys` 引入 C，启用时必须在 feature 与供应链审计中明确。许可：Apache-2.0。平台：std。
 - 为何不自己实现：Parquet 编码（D rem、RLE、delta、page 压缩、schema 嵌套）是重型协议。
 - 替代项：`polars`（更高层但依赖更重、API 域外）；`datafusion`（查询引擎，过重）；经 csv 间接（无列式性能）。理由：直接 arrow/parquet 面最小；feature 关闭时零影响。
 - **体积/编译时间警告**：arrow/parquet 会显著增加编译时间（ANISE 注释：启用 Arrow/Polars 显著增加编译时间，`anise/Cargo.toml` `validation` 特性注释附近 [观察]）；作为独立 feature 隔离（F-FEAT-001 加法性）。
@@ -571,7 +571,7 @@ ANISE 0.10.4 满足"生产级 SPICE/DAF/SPK/PCK/参考系后端"定位：纯 Rus
 | `vsop87` | `dep:vsop87` | 关 | 太阳/行星低精度历表（P1） |
 | `compression` | `dep:flate2`（rust_backend） | 关 | gzip/deflate（P1，纯 Rust） |
 | `integrity` | `dep:sha2` | 关 | 数据校验和（P1） |
-| `fits` | `dep:fitsrs`（=0.4.2） | 关 | FITS 读取（P2） |
+| `fits` | `dep:fitsrs`（=0.4.1） | 关 | FITS 读取（P2） |
 | `votable` | `dep:votable` | 关 | VOTable（P2） |
 | `parquet` | `dep:arrow` + `dep:parquet` | 关 | 列式星表（P1/P2，重依赖，独立隔离） |
 | `healpix` | `dep:cdshealpix` | 关 | HEALPix（P2） |
@@ -605,7 +605,7 @@ flowchart LR
         VS[vsop87 3]
         FL[flate2 1 rust_backend]
         SH[sha2 0.11]
-        FITS[fitsrs =0.4.2] / VOT[votable 0.7]
+        FITS[fitsrs =0.4.1] / VOT[votable 0.7]
         AR[arrow+parquet 59]
         HP[cdshealpix 0.9 + moc 0.19]
         SG[sgp4 2] / JF[jiff 0.2]
@@ -641,7 +641,7 @@ flowchart LR
 | geographiclib-rs | MIT | 无 | Karney 算法注明出处 |
 | vsop87 | Apache-2.0 | 无 | VSOP87 系数为 IAU/公开数据 |
 | cdshealpix / moc / votable | Apache-2.0 OR MIT | 无 | — |
-| fitsrs =0.4.2 | Apache-2.0 OR MIT | 无 | CDS 官方纯 Rust 解析器；锁定 0.4.2 |
+| fitsrs =0.4.1 | Apache-2.0 OR MIT | 无 | CDS 官方纯 Rust解析器；锁定 0.4.1 |
 | arrow / parquet | Apache-2.0 | 无 | — |
 | jiff | Unlicense OR MIT | 无 | — |
 | zstd（parquet 传递） | MIT（zstd-sys 捆绑 C，BSD-3 系） | 无 | 仅 parquet codec 明确启用时进入依赖图 |
@@ -721,12 +721,12 @@ P0 自研（不依赖）：`Vec3`/`Mat3`/`Quaternion`/`StateTransform`、量类�
 
 ### 9.3 P2 专门集（可选 feature，默认关）
 
-`fits`（fitsrs =0.4.2）、`votable`（votable 0.7）、`parquet`（arrow+parquet 59）、`healpix`（cdshealpix 0.9）、`moc`（moc 0.19）、`sgp4`（sgp4 2）、`timezone`（jiff 0.2），以及通过 `--no-default-features` 验证的 `no_std` 内核。开发侧：novas 差分（许可澄清后）、cargo-fuzz 目标、Kani 核心证明。
+`fits`（fitsrs =0.4.1）、`votable`（votable 0.7）、`parquet`（arrow+parquet 59）、`healpix`（cdshealpix 0.9）、`moc`（moc 0.19）、`sgp4`（sgp4 2）、`timezone`（jiff 0.2），以及通过 `--no-default-features` 验证的 `no_std` 内核。开发侧：novas 差分（许可澄清后）、cargo-fuzz 目标、Kani 核心证明。
 
 ### 9.4 最终直接依赖总表（全部状态；无重复、无遗漏）
 
 **确定采用（4）**：hifitime、sofars、thiserror、libm
-**可选 feature（19）**：serde、rayon、anise、tracing、tracing-log、winnow、csv、vsop87、geographiclib-rs、flate2、sha2、fitsrs(=0.4.2)、votable、arrow、parquet、cdshealpix、moc、sgp4、jiff
+**可选 feature（19）**：serde、rayon、anise、tracing、tracing-log、winnow、csv、vsop87、geographiclib-rs、flate2、sha2、fitsrs(=0.4.1)、votable、arrow、parquet、cdshealpix、moc、sgp4、jiff
 **仅开发/验证（17）**：approx、proptest、rstest、trybuild、serde_json、criterion、iai-callgrind、arbitrary、libfuzzer-sys、tempfile、rand、rand_chacha、rand_distr、rand_pcg、rsofa、rust-spice、novas
 **仅工具链（12）**：cargo-deny、cargo-audit、cargo-semver-checks、cargo-msrv、cargo-fuzz、cargo-llvm-cov、rustfmt、Clippy、Miri、Kani、rustup nightly 组件、valgrind（iai 前置）
 **明确不采用（29）**：bitflags、nalgebra（直接）、uom、num-traits（直接）、memmap2、zerocopy、bytes、der、crc32fast、indexmap、tabled、const_format、snafu、log、erfa-sys、erfa、nyx-space、rust-astro、brentroot、argmin、roots、bzip2、fitsio、fitrs、celestial、celestial-eop-data、polars、chrono（直接）、zstd（直接）
@@ -767,10 +767,10 @@ libm|0.2.16|MIT|1.63                          hifitime|4.3.0|MPL-2.0|-
 sofars|0.6.1|MIT|-                             anise|0.10.4|MPL-2.0|-
 rayon|1.12.0|MIT OR Apache-2.0|1.80           sha2|0.11.0|MIT OR Apache-2.0|1.85
 memmap2|0.9.11|MIT OR Apache-2.0|1.65         winnow|1.0.4|MIT|1.65
-csv|1.4.0|Unlicense/MIT|1.73                  fitsrs|0.4.2|Apache-2.0 OR MIT|-
+csv|1.4.0|Unlicense/MIT|1.73                  fitsrs|0.4.1|Apache-2.0 OR MIT|-
 fitsio|0.21.10|MIT/Apache-2.0|1.58            votable|0.7.0|Apache-2.0 OR MIT|-
 cdshealpix|0.9.1|Apache-2.0 OR MIT|1.81       moc|0.19.2|Apache-2.0 OR MIT|-
-arrow|59.1.0|Apache-2.0|1.85                  parquet|59.1.0|Apache-2.0|1.85
+arrow|59.2.0|Apache-2.0|1.85                  parquet|59.2.0|Apache-2.0|1.85
 geographiclib-rs|0.2.7|MIT|1.70               sgp4|2.4.0|MIT|-
 jiff|0.2.35|Unlicense OR MIT|1.70             flate2|1.1.9|MIT OR Apache-2.0|1.67
 miniz_oxide|0.9.1|MIT OR Zlib OR Apache-2.0|- zstd|0.13.3|MIT|1.64
@@ -799,4 +799,4 @@ cargo-fuzz|0.13.2|-|-                         celestial|0.1.0|-|-
 
 - 本轮未修改 `ref/` 任一仓库，也未运行 cargo 构建、测试、lint 或格式化；配套 `docs/` 已同步 ANISE 和依赖决策。
 - 所有"确定/可选"条目均给出版本、feature、默认、no_std、unsafe/FFI、许可、MSRV、平台、不自己实现理由、替代项；"可选"条目全部有启用条件与关闭语义。
-- 无占位符、无待定结论：`brentroot` 等异常项已给明确结论（不采用/自研）；CDS FITS 依赖已核对为 `fitsrs =0.4.2`，并禁止误用名称相近的 `fitrs`。
+- 无占位符、无待定结论：`brentroot` 等异常项已给明确结论（不采用/自研）；CDS FITS 依赖已核对为已发布的 `fitsrs =0.4.1`，并禁止误用名称相近的 `fitrs`。

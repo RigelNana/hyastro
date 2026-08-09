@@ -495,6 +495,16 @@ impl<S: TimeScale> EarthAttitudeSolution<S> {
         self.observations
     }
 
+    /// Returns the IAU 2000 TIO locator $s'$.
+    pub const fn tio_locator(self) -> Angle {
+        self.rotations.tio_locator
+    }
+
+    /// Returns the IAU 2000 Earth Rotation Angle in $[0,2\pi)$.
+    pub const fn earth_rotation_angle(self) -> HourAngle {
+        self.rotations.earth_rotation_angle
+    }
+
     /// Returns the IAU 2006/2000A precession-nutation result.
     pub const fn precession_nutation(self) -> PrecessionNutation {
         self.rotations.precession_nutation

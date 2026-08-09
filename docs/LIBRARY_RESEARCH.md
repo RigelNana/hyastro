@@ -491,3 +491,208 @@ flowchart LR
 | novas parity 测试 | ref/novas/tests/parity_against_c.rs、ref/novas/scripts/generate_parity_baseline.sh、ref/novas/tests/data/parity_expected.txt |
 
 （本报告未运行任何构建/测试/格式化；所有行号引用基于调研时的本地检出版本。）
+
+## 9. Gaia DR3 数据与 Rust 解析生态（2026-08-06）
+
+### 9.0 本节调研信息与方法
+
+- 本节的 crates.io、docs.rs、官方仓库、Gaia/IVOA/astropy 站点查询均于 2026-08-06 执行；所有“最新版本/最新提交”以该查询时点为准。
+- 方法与契约遵守：仅使用一手来源——crates.io API 元数据、crates.io 打包的发布版 Cargo.toml、官方仓库源码（本地克隆 `/tmp/libg-*`，标注 HEAD）、docs.rs、Gaia 官方文档与 TAP 服务 capabilities、IVOA 规范页、astropy/astroquery/pyvo 官方文档；本地已缓存的 `csv 1.4.0` / `csv-core 0.1.13` 源码（`~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/`）直接作为一手来源。按任务约定未运行格式化、lint、测试或项目构建。
+- 标注约定延续本报告：`[观察]` = 直接从源码/元数据/文档读取的事实；`[推断]` = 基于观察的推理。本节对 `docs/DEPENDENCIES.md` 3.3.3/3.3.7/3.3.8/3.3.9 的既有记录做了逐项复核，差异以"更正"条目列出（见 9.6）。
+- 本节结论先行的四条回答（对应任务验收项）：
+  1. **不存在能直接映射 Gaia DR3 字段/2p-5p-6p 解的 Rust crate**（9.1）；Gaia 语义层必须由 hyastro 自研。
+  2. 每种 Gaia 常见导出格式的可用 Rust 库：CSV → `csv`（P1）；ECSV → 无 crate，YAML 头 + csv 体自研薄层；VOTable → `votable`（CDS，P2）；FITS → `fitsrs`（P2）或 `fitsio`（FFI，不采用）；Parquet → `arrow` + `parquet`（P2）（9.3/9.5）。
+  3. 最适合 hyastro 的组合：P1 = `csv 1.4.0` 流式 + 自研 Gaia 语义层；P2 = `fitsrs =0.4.1`、`votable 0.7.0`、`arrow 59`+`parquet 59`（9.5）。
+  4. 不采用：`fitsio`（cfitsio FFI）、`fitrs`（GPL-3.0 + 2019 年停更）、社区 parquet（非官方格式）、astroquery/pyvo/astropy（Python，仅作 oracle）（9.4/9.5）。
+
+### 9.1 是否存在 Gaia DR3 专用 Rust 解析库（问题一）
+
+[观察] crates.io 搜索 `q=gaia`（2026-08-06，API 分页前 50 条）返回大量与 Gaia 星表无关的同名 crate：`gaia` 0.2.1（“A terrain rendering engine for gfx applications”）、`gaia-client`（Gaia secrets 守护客户端）、`gaia-ccsds-c2a` / `gaia-stub` / `gaia-tmtc` 1.2.0（C2A 卫星测控）、`gaia-assembler` / `gaia-types` / `gaia-binary` 等。唯一相关候选是下一条的 `gaia_access`，但它不是文件或星表语义解析器。
+
+[观察] 唯一与“Gaia ESA Archive”相关的 crate 是 **`gaia_access` 0.2.0**（`TheComamba/gaia_access`，2026-01-16 发布，约 5.7k 次下载，MIT，edition 2024）。源码核实（本地克隆 HEAD `5d292ef` 2026-05-01）：它是 Gaia **TAP+ 同步查询 HTTP 客户端**——`src/query.rs` 的 `do_query` 直接请求 `https://gea.esac.esa.int/tap-server/tap/sync`，并指定 ADQL 与 JSON；列名由 `generate_code.py` 从 Gaia TAP schema XML 生成枚举（例如 `src/data/gaiadr3/gaia_source/mod.rs`），结果以 `serde_json` 反序列化为 `Vec<HashMap<Col, GaiaCellData>>`（string/float/null 联合）。0 处 unsafe。**它不解析任何本地文件格式，不提供 2p/5p/6p 字段语义，并把整个同步 JSON 响应读入 `String` 后构造 `Vec`，不是有界内存的大目录路径。**
+
+[观察] crates.io 搜索 `q=ecsv`（2026-08-06）无相关 crate（返回项均为无关名称，如 `ecscope`、`bluecsv`）。**Rust 生态不存在完整 ECSV 解析库。**
+
+[观察] VOTable 相关搜索仅有 CDS 的 `votable`（见 9.3.3）；FITS 相关搜索中除 `fitsrs`/`fitsio` 外仅有 `fits` 0.0.0（占位未发布）、`fits-header` 0.4.2（纯 Rust 头读写，无表数据）、`fitrs` 0.5.0（GPL-3.0、2019 年停更，见 9.3.6）。
+
+**结论（问题一）**：[观察] 截至 2026-08-06，crates.io 上不存在直接映射 Gaia DR3 字段/2p-5p-6p 解的 Rust crate；Gaia 语义（列选择、单位、`astrometric_params_solved` 解释、`μα*`、TCB 参考历元、相关系数）必须由 hyastro 自己的适配层实现（与 PRD F-GAIA-001/006/007/008/009/013 一致）。`gaia_access` 可生成类型化 ADQL 列名并执行同步查询，但不能替代本地格式与领域语义解析。
+
+### 9.2 Gaia DR3 官方数据获取渠道与格式（一手来源）
+
+#### 9.2.1 TAP+ 服务与输出格式
+
+[观察] Gaia Archive 基于 ESA 的 **TAP+**——IVOA TAP 1.1 的后向兼容扩展（官方文档 `Gaia_archive/chap_archive/sec_cu9arch_intro/`：同步/异步双执行队列、持久用户表、配额与超时）。TAP+ 端点 `https://gea.esac.esa.int/tap-server/tap`。
+
+[观察] TAP capabilities XML（2026-08-06 实取 `https://gea.esac.esa.int/tap-server/tap/capabilities`）声明的 `outputFormat` 别名与 MIME：
+- `votable_gzip` / `votable` / `votable_plain`（`application/x-votable+xml`）
+- `csv`（`text/csv`）
+- **`ecsv`（`text/ecsv`）**——Gaia TAP 原生支持 ECSV 输出
+- `tsv`（`text/tab-separated-values`）
+- `json`（`application/json`）
+- `fits`（`application/fits`）
+- 上传方式：`upload-inline` / `upload-http` / `upload-ftp`；查询语言：ADQL 2.0 / 2.1。
+
+[观察] astroquery.gaia 文档列出的输出格式为 `'votable'`、`'votable_plain'`、`'fits'`、`'csv'`、`'json'`（未列 ecsv/tsv，但 TAP capabilities 是服务侧事实标准）；同步查询限 2000 行，大结果须用异步作业。
+
+#### 9.2.2 官方批量下载（bulk download）
+
+[观察] ESA 官方 DR3 页面（cosmos.esa.int/web/gaia/dr3）原文："The full Gaia DR3 data set is downloadable from the Gaia Archive as a set of **compressed ECSV files**. The total size is about 10 TB (or about 9 TiB)"。**即 DR3 全量目录的官方 bulk 格式是 ECSV（gzip），而非 FITS。**
+
+[观察] DR3 文档"13.2.5 ECSV generation"（`Catalogue_consolidation/chap_cu9cva/sec_cu9cva_consolidation/ssec_cu9cva_ecsv.html`）原文："As in previous releases, the Gaia DR3 data is also provided for bulk download ... these files are plain text files in CSV format, compressed with the standard GZIP algorithm. **New in this release is the use of the Enhanced Character Separated Value format (ECSV)**, adopted by astropy. These are regular CSV files, with an extra header with metadata about the table itself and its columns in YAML format"。多维列（向量/矩阵）以 JSON 字符串编码进 CSV 引号字段。
+
+[观察] 官方 CDN 对象清单于 2026-08-06 实取到 `gaia_source` 的 **3386 个** `.csv.gz` 分片和一个 `_MD5SUM.txt`；压缩数据总量为 753,025,661,884 字节（约 753.0 GB / 701.3 GiB），单片约 130–277 MB。首片 `GaiaSource_000000-003111.csv.gz` 的响应为 `application/gzip`，长度 233,642,769 字节；流式解压确认内容以 `# %ECSV 1.0` 开始，前 1000 行是 YAML 元数据注释，随后是含 152 列的 CSV 表头和数据行。因此文件名虽为 `.csv.gz`，语义上确为官方文档所述的 ECSV(gzip)，不能按“首行即 CSV 表头”解析。清单同时提供每个分片的 MD5。
+
+#### 9.2.3 `gaia_source` 数据模型关键语义（字段级事实，供语义层实现）
+
+[观察] 官方数据模型页（`Gaia_archive/chap_datamodel/sec_dm_main_source_catalogue/ssec_dm_gaia_source.html`）：
+- **`astrometric_params_solved`**（byte，位编码）：位从最低位起依次为 ra/dec/parallax/pmra/pmdec/μr/pseudocolour；DR3 实际只有 3 个取值（原文 "all the sources in DR3 have only values of 3, 31 or 95"）：
+  - `3`（0000011₂）= ra+dec（**2 参数解**，仅位置）
+  - `31`（0011111₂）= ra+dec+parallax+pmra+pmdec（**5 参数解**）
+  - `95`（1011111₂）= 5 参数 + 伪色 pseudocolour（**6 参数解**）
+  - 同一页 `astrometric_gof_al` 条目交叉印证：`N=5 for 2-parameter and 5-parameter solutions (respectively astrometric_params_solved = 3 or 31) and 6 for 6-parameter solutions (astrometric_params_solved = 95)`。
+- **`ref_epoch`**：double，单位 `Time[Julian Years]`，"Reference epoch to which the astrometric source parameters are referred, expressed as a **Julian Year in TCB**"（即 J2016.0 = 2016.0 TCB 儒略年）。
+- **`pmra` = `μα* ≡ μα cos δ`**（局部切平面投影，角速率 `mas yr⁻¹`）；`ra_error = σα* ≡ σα cos δ`（mas）。
+- 相关系数列共 10 个：`ra_dec_corr`、`ra_parallax_corr`、`ra_pmra_corr`、`ra_pmdec_corr`、`dec_parallax_corr`、`dec_pmra_corr`、`dec_pmdec_corr`、`parallax_pmra_corr`、`parallax_pmdec_corr`、`pmra_pmdec_corr`。
+- **`solution_id`**（long）：DPAC 处理管线版本标识（溯源用，官方 decoder 页面 gaia.esac.esa.int/decoder/solnDecoder.jsp）；**`source_id`** 为 64 位整数，编码 HEALPix level 12（Nside=4096）像元、3 位 DPC 码、25+7 位运行号/分量号；`random_index` 为 0..N-1 随机置换（抽样验证用）。
+- 谱线、历元测量等数组类型数据经 **Datalink** 资源另行提供（表说明原文）。
+
+### 9.3 Rust 通用格式库逐项核实（问题二）
+
+调研日（2026-08-06）版本/许可/元数据均来自 crates.io API；能力与 unsafe 来自发布包或官方仓库源码。汇总表：
+
+| crate（仓库） | 最新版（发布日） | 许可 | MSRV | no_std | unsafe / FFI | 流式 | 维护状态 | 对 Gaia 的适用 |
+|---|---|---|---|---|---|---|---|---|
+| csv（BurntSushi/rust-csv） | 1.4.0（2025-10-17） | Unlicense/MIT | 1.73 | 否（csv-core 可） | 4 处非 FFI（UTF-8 快速路径） | 是（逐行迭代） | 活跃，事实标准 | **P1：CSV/ECSV 数据体流式解析** |
+| csv-core（同仓库） | 0.1.13（2025-10-17） | Unlicense/MIT | 未声明 | **是**（`#![no_std]`） | 无 | 是（字节级状态机） | 活跃 | 底层替代/no_std 需求 |
+| ECSV | 无 crate | — | — | — | — | — | 生态空白 | 自研薄层（YAML 头+csv）或请求 CSV |
+| votable（cds-astro/cds-votable-rust） | 0.7.0（2025-12-02） | Apache-2.0 OR MIT | 未声明（edition 2024） | 否 | ~19 处非 FFI unsafe；无 FFI | 是（StAX/quick-xml） | 活跃（CDS 官方） | **P2：VOTable 读/写** |
+| fitsrs（cds-astro/fitsrs） | **0.4.1**（2025-10-20；git 0.4.2 未发布） | Apache-2.0 OR MIT | 未声明（edition 2018） | 否 | **0 处活动 unsafe**、无 FFI | 是（迭代器+seek；异步整块） | 活跃（CDS） | **P2：FITS BINTABLE 读取**（基础支持） |
+| fitsio（simonrw/rust-fitsio） | 0.21.10（2026-04-20） | MIT/Apache-2.0 | 1.58（发布元数据） | 否 | FFI（fitsio-sys `links="cfitsio"`） | 是（行读取） | 活跃 | **不采用**（C 工具链/FFI） |
+| fitrs（malikolivier/fitrs） | 0.5.0（2019-10-31） | GPL-3.0 | 未声明 | 否 | 纯 Rust | 是 | **2019 年停更** | 明确不采用 |
+| fits-header（nightwatch-astro） | 0.4.2（2026-07-22） | MPL-2.0 | 未声明 | 否 | 无 | 头读写 | 活跃 | 补充候选（仅头，无表数据） |
+| arrow + parquet（apache/arrow-rs） | 59.2.0（2026-08-06） | Apache-2.0 | 1.85 | 否 | 内部少量非 FFI unsafe（parquet 40、arrow-csv 1）；默认含 zstd→zstd-sys(C) | 是（ParquetRecordBatchReader / arrow-csv） | 活跃（ASF） | **P2：列式/批量/parquet** |
+| gaia_access（TheComamba/gaia_access） | 0.2.0（2026-01-16） | MIT | 未声明（edition 2024） | 否 | 0 处 | TAP 查询（非文件解析） | 低成熟度（单维护者） | 参考/可选 TAP 客户端 |
+| scirs2-io（cool-japan/scirs） | 0.6.5（2026-07-31） | Apache-2.0 | 未声明 | 否 | 依赖 netcdf3/oxih5 等 | 是 | 活跃 | 观察项（astropy 移植） |
+
+#### 9.3.1 csv / csv-core（P1 采用）
+
+[观察] `csv` 1.4.0：crates.io 元数据 `license = "Unlicense/MIT"`、`rust_version = "1.73"`、`repository = https://github.com/BurntSushi/rust-csv`；本地缓存源码 `src/reader.rs:713` `pub struct Reader<R>`、`:869` `pub fn from_reader(rdr: R) -> Reader<R>`、`:1148` `pub fn records(&mut self) -> StringRecordsIter<'_, R>`（流式逐行迭代，恒定内存）、`:1048` `pub fn deserialize<D>(&mut self)`（serde derive 反序列化）、`:1323` `pub fn headers()`。无 Cargo features、无直接依赖。
+[观察] `csv` 全仓仅 `src/string_record.rs` 4 处 `unsafe`（`str::from_utf8_unchecked`，零拷贝 UTF-8 快速路径，非 FFI）——**更正 DEPENDENCIES.md 3.3.3 中"unsafe/FFI：无"的表述（无 FFI 属实，存在 4 处非 FFI unsafe）**；其余版本/许可/MSRV 记录与 crates.io 一致。
+[观察] `csv-core` 0.1.13：`src/lib.rs:2-5` 原文 "This crate will never use the standard library. no_std support is therefore enabled by default"、`:100` `#![no_std]`。可作为 no_std 子集或极简解析底层。
+[观察] 与 DEPENDENCIES.md 3.3.3 的 `csv = "1"`（P1，`catalog-csv` feature）一致；1.4.0 仍是 crates.io 最新稳定版（2026-08-06）。
+
+#### 9.3.2 ECSV（P1/P2：无 crate，自研薄层或改请求 CSV）
+
+[观察] crates.io 无 ECSV crate（见 9.1）。格式规范一手来源 = astropy 官方文档（docs.astropy.org/en/stable/io/ascii/ecsv.html，源自 APE6）："The format stores column specifications like unit and data type along with table metadata by using a **YAML header** data structure. The actual tabular data are stored in a standard **CSV** format"；文件必须以 `# %ECSV 1.0` 起始；`datatype` 列出各列（name/unit/datatype），`schema: astropy-2.0`；缺失值 = 空串（默认）；分隔符仅空格或逗号；多维列以 JSON 字符串编码。astropy 7.2+ 可用 `pyarrow`/`pandas` 引擎读 ECSV（文档称较 `io.ascii` 快约 15x/3x）。
+[观察] Gaia 侧三处一手来源确认 ECSV 是真实交付格式：TAP capabilities 的 `ecsv` 别名；官方 bulk 为压缩 ECSV（9.2.2）；DR3 13.2.5 文档对格式的官方描述（YAML 头 + CSV 体 + JSON 多维列）。
+[观察] Rust 生态无 YAML 头 + CSV 体的现成实现 → **结论：P1 不引入 ECSV crate；ECSV 读取 = 自研薄层（约百行：`# %ECSV` 头校验 + YAML 头解析 + csv 流式读体），或数据获取时直接请求 `FORMAT=csv`（同数据、免头解析）。** hyastro 的 F-GAIA-001（CSV/ECSV 流式解析）与 F-IO-005 由 `csv` + 薄层满足。
+
+#### 9.3.3 votable（CDS，P2 采用候选）
+
+[观察] `votable` 0.7.0（2025-12-02 发布；git HEAD `f410d65` 2026-07-17 "Add COOSYS reference systems from IVOA vocabulary"）：crates.io 元数据 `license = "Apache-2.0 OR MIT"`、`repository = https://github.com/cds-astro/cds-votable-rust/`；Cargo.toml：edition 2024、作者 F.-X. Pineau 与 T. Dumortier（CDS，Pineau 是 IVOA VOTable 规范编者之一）。
+[观察] 能力（README 与源码）：VOTable **读/写**；XML-TABLEDATA / XML-BINARY / XML-BINARY2 与 JSON/YAML/TOML 互转；`mivot` feature 支持 MIVOT；README "supports CDATA in rows, **StAX mode for streaming**"（基于 quick-xml 0.23 事件流）；API 示例 `VOTable::from_ivoa_xml_file / from_ivoa_xml_str / from_ivoa_xml_bytes / from_ivoa_xml_reader`（src/votable.rs:218-232）、`to_tabledata / to_binary / to_binary2`（src/votable.rs:181-193）。
+[观察] 规范覆盖：crates.io 侧最新 IVOA 推荐为 **VOTable 1.5**（IVOA Recommendation 2025-01-16，ivoa.net/documents/VOTable/）；`votable` crate 的 `Version` 枚举覆盖 V1_0–V1_6（CHANGELOG 0.7.0 "Add VOTable tag 1.6"），其中 V1_4/V1_5/V1_6 均映射同一 namespace URI `http://www.ivoa.net/xml/VOTable/v1.3`（VOTable 1.3+ 未更换 namespace，属规范兼容行为）。
+[观察] unsafe：全仓约 19 处，全部为非 FFI 的 `String::from_utf8_unchecked` / `str::from_utf8_unchecked` / `as_mut_vec`（XML 文本到 UTF-8 的性能快速路径，src/votable.rs、src/data/tabledata.rs、src/timesys.rs 等）——**更正 DEPENDENCIES.md 3.3.8 中"unsafe/FFI：无"的表述（无 FFI 属实，存在约 19 处非 FFI unsafe）**。
+[观察] README 自述 "not yet as clean and documented as I would like"、0.x API 可能调整（作者列举了 'flag attributes with a @ prefix' 等候选变更）→ 与 DEPENDENCIES.md 3.3.8 的"锁版本、适配层薄、P2 接入"结论一致。0.7.0 的 `quick-xml = "0.23"` 为流式事件解析，内存有界 [推断——未实测]。
+
+#### 9.3.4 fitsrs（CDS 纯 Rust FITS，P2 采用候选——**版本更正为 =0.4.1**）
+
+[观察] **crates.io 最新稳定版 0.4.1**（2025-10-20）；git master（HEAD `776ba63` 2026-05-05）Cargo.toml 已是 0.4.2 但含 `wcs = { git = "https://github.com/cds-astro/wcs-rs", branch = "master" }` 未发布依赖（发布版 0.4.1 的依赖是 `wcs = "0.4.2"` 版本约束）→ **0.4.2 尚未发布且当前形态不可发布。DEPENDENCIES.md 3.3.7 的 `fitsrs = "=0.4.2"` 在 crates.io 上不存在对应版本，应以 `=0.4.1` 锁定（更正）**。
+[观察] 元数据：`license = "Apache-2.0 OR MIT"`、edition 2018、作者 Matthieu Baumann（CDS，Strasbourg）；README 首页 "FITS file reader written in pure Rust"，初始动机是 HiPS（HEALPix 天空图像）与 Aladin Lite。
+[观察] 能力（README Features 清单）：
+- 多 HDU，以图像为主；BINTABLE 为 "**Basic support of Bintable**"（README:44），"A **very new support of binary table extension** has been added ... mainly for supporting the tiled compressed image convention"（README:13）——即 BINTABLE 支持主要服务于瓦片压缩图像约定，Gaia `gaia_source` 这类大 BINTABLE 属边界场景，接入必须用真实 Gaia FITS 样本验收；
+- ASCII 表未实现（仅数据字节迭代 + 强制头卡片，README:14）；
+- 流式：支持超内存文件（迭代器 + 按像素/行 seek，README:39）；异步读取整块（不可 seek）；
+- tiled-image 压缩：GZIP/GZIP2/RICE（u8/i16/i32/f32）；H_compress/PLI0 与 `NULL_PIXEL_MASK`/`ZMASKCMP` 不支持；
+- **无 FITS 写入器**（README:50）；
+- WCS 解析经 `wcs`（cds-astro/wcs-rs）crate；`image` 为可选 feature。
+[观察] unsafe/FFI：全仓 `src/` 仅 `src/hdu/primary.rs:137` 一处 `unsafe` 字样，且位于**整段被 `/* */` 注释掉的死代码**（src/hdu/primary.rs:102-145，异步旧实现）→ **实际活动 unsafe = 0，无 FFI，纯 Rust**。依赖 futures/async-trait（异步）、flate2 1.0.35（压缩，纯 Rust 后端可用）。
+[观察] 维护：活跃（2025 年 0.3.x→0.4.x 多版本，HEAD 2026-05-05）；deprecated 风险点是 BINTABLE 支持深度有限 + 无写入器。
+
+#### 9.3.5 fitsio（cfitsio FFI 绑定——明确不采用，维持 DEPENDENCIES.md 决策）
+
+[观察] `fitsio` 0.21.10（2026-04-20 发布；git HEAD `9bf02d8` 2026-08-03，release-plz 自动发布，活跃）：README 首行 "FFI wrapper around cfitsio in Rust"；`fitsio-sys` 0.5.7 声明 `links = "cfitsio"`、`build = "build.rs"`；依赖 `cfitsio >= 3.37`，需系统预装 C 库或用 `fitsio-src` 特性自编译（autotools/CMake，需 C 工具链）。许可 MIT/Apache-2.0；crates.io 发布元数据 `rust_version = "1.58.0"`（git 现为 1.63.0）。
+[观察] 能力（源码）：完整读写——`FitsFile::open/create/create_table/create_image`（src/fitsfile.rs:23-534）、`hdu.rs:145/174` `read_rows/read_row` 行级读取、images、headers、`threadsafe_fitsfile` 模块。
+[观察] 结论：**能力最全（含写入）但引入 cfitsio C 依赖与 FFI 审计面，维持 DEPENDENCIES.md"生产基线不引入 cfitsio FFI"的决策**；若未来需要完整 FITS 写入（fitsrs 无写入器），fitsio 是唯一成熟选项，届时须另立决策（DEPENDENCIES.md 3.3.7 已如此约定）。
+
+#### 9.3.6 fitrs 与 fits-header（补充核实）
+
+[观察] `fitrs` 0.5.0：crates.io 元数据 `license = "GPL-3.0"`、最后发布 2019-10-31、仓库 malikolivier/fitrs → **GPL-3.0 + 约 7 年未发布，明确不采用**；DEPENDENCIES.md 3.3.7 的"名称陷阱"警告成立。
+[观察] `fits-header` 0.4.2（nightwatch-astro，2026-07-22）：MPL-2.0（0.3.x 为 Apache-2.0，0.4 起改为 MPL-2.0）、纯 Rust、仅 FITS 头读写（"never touches pixel data"）→ 不改变选型；如需独立 FITS 头解析可作补充。
+
+#### 9.3.7 arrow-rs / parquet（P2 大规模路径——版本更正为 59.2.0）
+
+[观察] `arrow` 59.2.0 / `parquet` 59.2.0（均 2026-08-06 发布；workspace `rust-version = "1.85"`、Apache-2.0，仓库 apache/arrow-rs）。DEPENDENCIES.md 3.3.9 记录的 59.1.0 已是旧版（**更正为 59.2.0**）。
+[观察] `parquet` 默认 features：`arrow, snap, brotli, flate2-zlib-rs, lz4, zstd, base64, simdutf8`（Cargo.toml 原文）——`arrow` feature 提供 `ParquetRecordBatchReaderBuilder::try_new(reader)`（parquet/src/arrow/arrow_reader/mod.rs:1106）→ `build()` → `ParquetRecordBatchReader`（流式批次迭代）；`zstd = ["dep:zstd"]`（zstd 0.13 → zstd-sys 捆绑 C，**默认启用**；与 DEPENDENCIES.md 3.3.12"zstd 仅经 parquet 传递、接受其 FFI"一致）；flate2 默认 `zlib-rs` 后端（纯 Rust）。`arrow` 默认 features：`csv, ipc, json`——`csv` = arrow-csv，其 `ReaderBuilder`（arrow-csv/src/reader/mod.rs:1152，默认 batch_size 1024）把 CSV 流式读成 `RecordBatch`（Gaia CSV → Arrow 列式的现成桥）。
+[观察] unsafe/FFI：arrow-rs 为纯 Rust（无外部 C 库链接；`ffi`/`pyarrow` 为可选 feature）；parquet/src 共 40 行 unsafe、arrow-csv/src 1 行（SIMD/缓冲转换类，非 FFI）——与 DEPENDENCIES.md"arrow 内部存在少量 unsafe（列缓冲）；无外部 FFI"一致（zstd 经 zstd-sys 的 C 除外）。
+[观察] **"Gaia DR3 官方 parquet 分片"无官方一手来源**：ESA 官方提供的是 ECSV(gz)/CSV(gz) bulk 与 TAP 的 votable/csv/ecsv/tsv/json/fits 输出（9.2），TAP capabilities 与官方文档均无 parquet；parquet 形态是社区转换产物 [推断]。P2 若需 parquet：自转（TAP/CSV/ECSV → arrow-csv → parquet writer）或采用社区数据集并记录来源校验。
+
+#### 9.3.8 gaia_access（可选 TAP 客户端——观察项）
+
+[观察] 0.2.0（2026-01-16）：MIT、edition 2024、`ureq`（rustls）HTTP；类型化列枚举 + `GaiaQueryBuilder`（src/query.rs:44,69,166,219）+ `do_query` 直连 TAP sync 端点（query.rs:220-222）；返回 `Vec<HashMap<Col, GaiaCellData>>`；0 unsafe；约 5.7k 下载。README 明示按需生成代码、单维护者扩展意愿有限。
+[观察] 定位：它把"ADQL 查询 → JSON 结果"做成类型化客户端，**不做文件解析、无 Gaia 字段语义（2p/5p/6p 等）**；对 hyastro 而言，TAP 获取可退化为"直接 HTTP + 解析返回的 CSV/VOTable"（hyastro 已有解析器），`gaia_access` 不是必需依赖；仅当其维护活跃度提升后才值得评估 [推断]。
+
+#### 9.3.9 scirs2-io（观察项）
+
+[观察] `scirs2-io` 0.6.5（cool-japan/scirs = SCiRS，astropy 生态的 Rust 移植，2026-07-31，Apache-2.0）：通用 I/O 工具，依赖含 netcdf3/oxih5/oxiarc-*（归档压缩）/rmp-serde 等，**无 votable/ecsv/FITS 表解析依赖**（crates.io dependencies API）→ 不改变本报告结论；可作为 astropy 生态移植进展的观察对象。
+
+### 9.4 非 Rust 工具：astroquery / pyvo / astropy（问题三）
+
+[观察] **astroquery**（astropy 附属包，Python，BSD-3-Clause，LICENSE.rst "Astroquery Developers"）：`astroquery.gaia.Gaia` 是 Gaia TAP+ 客户端——`query_object(_async)`、`cone_search_async`、`launch_job`（sync 限 2000 行）、`load_tables`（gaiadr3.gaia_source 列数 152、Size≈3.6 TB）、`dump_to_file` 输出格式 `'votable' | 'votable_plain' | 'fits' | 'csv' | 'json'`；查询结果即 astropy `Table`。官方文档明确"Results are stored ... as astropy Table"。
+[观察] **pyvo**（astropy 附属包，Python，BSD-3-Clause）：IVOA 标准协议客户端（TAP/SIA/SSA/SCS/SLAP），`vo.dal.TAPService(url).search(query)` 返回 `DALResultsTable`（numpy 记录数组风格）；依赖 numpy、astropy、requests。
+[观察] **astropy**（Python 核心天文库，BSD-3-Clause）：ECSV 格式的定义方（APE6 与官方文档），`Table.read/write(format='ecsv')`；astropy 7.2+ 支持 pyarrow/pandas 读引擎。
+[观察] **结论**：三者均为 Python 解释器运行时依赖，**不能成为 Rust 生产解析依赖**；可承担两类角色：(a) **数据获取 oracle**——用 `astroquery`/`pyvo` 一次性执行 ADQL 并把结果落盘为 CSV/ECSV/parquet 供 hyastro 消费（也可在 CI 中生成权威小样本）；(b) **解析差分 oracle**——用 astropy 生成 ECSV/CSV 参考文件，与 hyastro 解析结果对拍。Rust 侧与它们对等的能力（TAP 请求 + 解析返回格式）不需要 Python。
+
+### 9.5 对比矩阵与选型建议（问题四）
+
+| Gaia 导出/分发格式 | 官方来源（一手） | Rust 方案 | 版本（2026-08-06） | 优先级 | 备注 |
+|---|---|---|---|---|---|
+| CSV（TAP FORMAT=csv / bulk CSV gz） | TAP capabilities；CDN 实测分片文件 | **csv**（流式 `records()` + serde） | 1.4.0 | **P1** | 与 DEPENDENCIES.md 3.3.3 一致 |
+| ECSV（TAP FORMAT=ecsv / 官方 bulk ~10TB） | TAP capabilities；cosmos DR3 页；13.2.5 | **无 crate**：YAML 头 + csv 体自研薄层，或改请求 CSV | — | P1 | 生态空白（9.3.2） |
+| VOTable（TAP 默认） | TAP capabilities；IVOA VOTable 1.5（2025-01-16） | **votable**（CDS） | 0.7.0 | P2 | 支持 v1.0–1.6；锁版本、薄适配层 |
+| FITS（TAP FORMAT=fits / 伙伴镜像 [推断]） | TAP capabilities | **fitsrs** | =0.4.1（非 0.4.2） | P2 | BINTABLE 基础支持，Gaia 大表须验收；无写入器 |
+| Parquet（社区转换 [推断]） | 无官方来源 | **arrow 59.2 + parquet 59.2**（arrow-csv 桥接） | 59.2.0 | P2 | 列式批量；默认含 zstd(C) |
+| ADQL/TAP 查询 | TAP+ 文档 | 直接 HTTP + 解析；可选参考 gaia_access | 0.2.0 | 可选 | gaia_access 成熟度低，不作生产依赖 |
+| 2p/5p/6p 语义、μα*、TCB 历元 | gaia_source 数据模型页 | **hyastro 自研语义层** | — | P1 | 无现成 crate（9.1） |
+
+**P1 最小方案**：`csv = "1"`（可选 feature `catalog-csv`）流式解析 `gaia_source` CSV/CSV(gz)（含 ECSV 数据体）；自研 Gaia 语义层：`astrometric_params_solved` 3/31/95 → 2p/5p/6p、`pmra=μα*`、`ref_epoch` 按 TCB 儒略年解释、10 个相关系数、`solution_id`/`source_id` 溯源、列选择与未知列向前兼容（PRD F-GAIA-001/006/007/008/009/013）。ECSV 头解析用自研薄层（无 crate）；或数据获取时优先 `FORMAT=csv`。**零新增必需依赖之外的 footprint**。
+
+**P2 大规模方案**：`fitsrs = "=0.4.1"`（feature `fits`）读官方 FITS BINTABLE；`votable = "0.7"`（feature `votable`）读 TAP VOTable；`arrow = "59"` + `parquet = "59"`（feature `parquet`，`parquet/arrow` 默认含）做列式/批量与自转 parquet；全部可选 feature、默认关闭、零影响。TAP 数据获取直接用 HTTP（无 Python、无 gaia_access）。
+
+**明确不采用**：`fitsio`（cfitsio FFI + C 工具链；除非未来需写入）；`fitrs`（GPL-3.0 + 2019 停更）；`fits-header`（仅头）；社区 parquet（非官方格式，可自转）；astroquery/pyvo/astropy（Python，仅 oracle）；`gaia_access`（成熟度不足，观察）；ECSV crate（不存在）。
+
+### 9.6 对 docs/DEPENDENCIES.md 既有记录的更正汇总
+
+| DEPENDENCIES.md 记录 | 更正（2026-08-06 一手来源） |
+|---|---|
+| `fitsrs = "=0.4.2"`（3.3.7） | crates.io 最新稳定为 **0.4.1**（2025-10-20）；git master 0.4.2（2026-05-05）含未发布的 `wcs = { git = ... }` 依赖，尚未发布 → 以 `=0.4.1` 锁定 |
+| `arrow 59.1.0 / parquet 59.1.0`（3.3.9） | 最新 **59.2.0**（2026-08-06） |
+| `votable` "unsafe/FFI：无"（3.3.8） | 无 FFI 属实；源码含约 19 处非 FFI `unsafe`（UTF-8 快速路径） |
+| `csv` "unsafe/FFI：无"（3.3.3） | 无 FFI 属实；`string_record.rs` 含 4 处非 FFI `unsafe`（`from_utf8_unchecked`） |
+| "Gaia DR3 官方 parquet 分片"（3.3.9） | 官方渠道无 parquet（TAP capabilities 与 bulk 文档均无）；为社区转换 [推断] |
+| `votable` 支持 VOTable 1.4 | 现行 IVOA 推荐为 **VOTable 1.5**（2025-01-16）；crate 支持 V1.0–V1.6 标签 |
+| 3.3.3 "csv 最新 1.4.0、rust-version=1.73、Unlicense OR MIT" | 核实无误，维持 |
+
+其余决策（csv 为 P1、fitsrs/votable/arrow-parquet 为 P2 可选 feature、fitsio 明确不采用）与既有记录一致，未发现冲突。
+
+### 9.7 本节一手来源链接清单
+
+- Gaia DR3 `gaia_source` 数据模型（astrometric_params_solved/ref_epoch/μα*/相关系数）：https://gea.esac.esa.int/archive/documentation/GDR3/Gaia_archive/chap_datamodel/sec_dm_main_source_catalogue/ssec_dm_gaia_source.html
+- Gaia TAP capabilities（votable/csv/ecsv/tsv/json/fits、上传、ADQL）：https://gea.esac.esa.int/tap-server/tap/capabilities
+- Gaia Archive TAP+ 说明（同步/异步队列）：https://gea.esac.esa.int/archive/documentation/GDR3/Gaia_archive/chap_archive/sec_cu9arch_intro/
+- ESA DR3 官方页面（全量 bulk 为压缩 ECSV，约 10 TB）：https://www.cosmos.esa.int/web/gaia/dr3
+- DR3 文档 13.2.5 ECSV generation：https://gea.esac.esa.int/archive/documentation/GDR3/Catalogue_consolidation/chap_cu9cva/sec_cu9cva_consolidation/ssec_cu9cva_ecsv.html
+- 官方 CDN bulk 分片实测（`GaiaSource_000000-003111.csv.gz`，233 MB）：https://cdn.gea.esac.esa.int/Gaia/gdr3/gaia_source/
+- ECSV 格式规范（astropy 官方文档，APE6）：https://docs.astropy.org/en/stable/io/ascii/ecsv.html
+- IVOA VOTable 1.5（Recommendation 2025-01-16）：https://www.ivoa.net/documents/VOTable/
+- IVOA TAP 1.1（Recommendation 2019-09-27）：https://www.ivoa.net/documents/TAP/
+- crates.io 元数据（csv/csv-core/fitsrs/fitsio/votable/arrow/parquet/fitrs/fits-header/scirs2-io/gaia_access）：https://crates.io/api/v1/crates/<name>（2026-08-06 查询）
+- csv/csv-core 本地缓存源码：`~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csv-1.4.0/`、`csv-core-0.1.13/`
+- fitsrs：https://github.com/cds-astro/fitsrs （HEAD `776ba63` 2026-05-05；发布版 0.4.1 从 https://static.crates.io/crates/fitsrs/fitsrs-0.4.1.crate 核验）
+- votable：https://github.com/cds-astro/cds-votable-rust （HEAD `f410d65` 2026-07-17）
+- fitsio / fitsio-sys：https://github.com/simonrw/rust-fitsio （HEAD `9bf02d8` 2026-08-03）
+- arrow-rs（arrow/parquet 59.2.0）：https://github.com/apache/arrow-rs/tree/59.2.0
+- gaia_access：https://github.com/TheComamba/gaia_access （HEAD `5d292ef` 2026-05-01）
+- astroquery Gaia 文档：https://astroquery.readthedocs.io/en/latest/gaia/gaia.html
+- pyvo 文档：https://pyvo.readthedocs.io/en/latest/
+- astropy / astroquery / pyvo 许可（BSD-3-Clause）：https://github.com/astropy/astropy/blob/main/LICENSE.rst、https://github.com/astropy/astroquery/blob/main/LICENSE.rst、https://github.com/astropy/pyvo/blob/main/LICENSE.rst

@@ -1,8 +1,8 @@
 use approx::assert_abs_diff_eq;
 use hyastro::time::{
-    CivilDateTime, Date, DateTime, Duration, Error, FixedUtcOffset, Gps, Gregorian, Instant,
-    Julian, JulianDate, JulianEpoch, LeapKind, LeapSecond, LeapSeconds, Tai, TimeContext,
-    TimeInterval, TimeOfDay, Tt, Utc, Weekday,
+    CalendarMonths, CalendarSpan, CalendarYears, CivilDateTime, Date, DateTime, Duration, Error,
+    FixedUtcOffset, Gps, Gregorian, Instant, InvalidDayPolicy, Julian, JulianDate, JulianEpoch,
+    LeapKind, LeapSecond, LeapSeconds, Tai, TimeContext, TimeInterval, TimeOfDay, Tt, Utc, Weekday,
 };
 use proptest::prelude::*;
 
@@ -321,4 +321,62 @@ fn fixed_offset_labels_reject_the_utc_leap_second_itself() {
         context.represent_fixed::<Gregorian, _>(leap, FixedUtcOffset::east_hours(8).unwrap()),
         Err(Error::FixedOffsetLeapSecondUnsupported)
     ));
+}
+
+#[test]
+fn calendar_displacements_keep_months_distinct_from_durations() {
+    let leap_day = Date::<Gregorian>::new(2024, 2, 29).unwrap();
+    assert!(
+        leap_day
+            .checked_add_years(CalendarYears::new(1), InvalidDayPolicy::Reject)
+            .is_err()
+    );
+    assert_eq!(
+        leap_day
+            .checked_add_years(CalendarYears::new(1), InvalidDayPolicy::Constrain)
+            .unwrap(),
+        Date::new(2025, 2, 28).unwrap()
+    );
+
+    let january_end = Date::<Gregorian>::new(2024, 1, 31).unwrap();
+    assert!(
+        january_end
+            .checked_add_months(CalendarMonths::new(1), InvalidDayPolicy::Reject)
+            .is_err()
+    );
+    assert_eq!(
+        january_end
+            .checked_add_months(CalendarMonths::new(1), InvalidDayPolicy::Constrain)
+            .unwrap(),
+        Date::new(2024, 2, 29).unwrap()
+    );
+    assert_eq!(
+        january_end
+            .checked_add_calendar_span(CalendarSpan::new(0, 1, 1), InvalidDayPolicy::Constrain,)
+            .unwrap(),
+        Date::new(2024, 3, 1).unwrap()
+    );
+}
+
+#[test]
+fn calendar_month_differences_distinguish_boundaries_whole_months_and_remainders() {
+    let january_end = Date::<Gregorian>::new(2024, 1, 31).unwrap();
+    let february_start = Date::<Gregorian>::new(2024, 2, 1).unwrap();
+    assert_eq!(
+        february_start.month_boundaries_since(january_end).unwrap(),
+        1
+    );
+    assert_eq!(
+        february_start
+            .whole_months_since(january_end, InvalidDayPolicy::Constrain)
+            .unwrap(),
+        0
+    );
+
+    let march_end = Date::<Gregorian>::new(2024, 3, 31).unwrap();
+    let difference = march_end
+        .calendar_difference_since(january_end, InvalidDayPolicy::Constrain)
+        .unwrap();
+    assert_eq!(difference.whole_months(), 2);
+    assert_eq!(difference.remaining_days(), 0);
 }

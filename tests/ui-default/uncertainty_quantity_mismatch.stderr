@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui-default/uncertainty_quantity_mismatch.rs:15:46
+   |
+15 |     let _ = sample.with_standard_uncertainty(angular);
+   |                    ------------------------- ^^^^^^^ expected `StandardUncertainty<Duration>`, found `StandardUncertainty<Angle>`
+   |                    |
+   |                    arguments to this method are incorrect
+   |
+   = note: expected struct `StandardUncertainty<hyastro::time::Duration>`
+              found struct `StandardUncertainty<Angle>`
+note: method defined here
+  --> src/time/earth_rotation.rs
+   |
+   |     pub const fn with_standard_uncertainty(
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^

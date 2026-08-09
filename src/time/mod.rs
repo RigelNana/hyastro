@@ -24,12 +24,17 @@ mod scale;
 #[cfg(feature = "std")]
 mod tdb;
 
-pub use calendar::{Calendar, Date, Gregorian, Julian, JulianDayNumber, Weekday};
+pub use calendar::{
+    Calendar, CalendarDifference, CalendarMonths, CalendarSpan, CalendarYears, Date, Gregorian,
+    InvalidDayPolicy, Julian, JulianDayNumber, Weekday,
+};
 pub use civil::{DateTime, TimeOfDay};
 pub use context::{NoEarthOrientation, TimeContext, TimeScaleModel};
 pub use delta_t::DeltaT;
 pub use duration::Duration;
-pub use earth_attitude::{EarthAttitude, EarthAttitudeSample, EarthAttitudeTable};
+pub use earth_attitude::{
+    EarthAttitude, EarthAttitudeSample, EarthAttitudeStandardUncertainties, EarthAttitudeTable,
+};
 pub use earth_rotation::{EarthRotation, EarthRotationSample, EarthRotationTable};
 pub use eop::{
     CelestialPoleOffsetX, CelestialPoleOffsetY, EarthOrientation, EarthOrientationSample,

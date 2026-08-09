@@ -188,23 +188,69 @@ v_to = R_from_to v_from + ω × (R_from_to r_from) + t_dot
 天体测量修正链使用不同结果类型：
 
 ```text
-CatalogPlace<F>
-    -> AstrometricPlace<F>
-    -> ApparentPlace<F>
-    -> VacuumObservedPlace<Horizontal>
-    -> ObservedPlace<Horizontal>
+InfiniteCatalogPlace
+    -> AstrometricCatalogPlace<S>
+    -> VacuumObservedCatalogPlace<S>
+    -> ObservedCatalogPlace<S>
+
+SpatialCatalogPlace <-> BarycentricCatalogState
+SpatialCatalogPlace
+    -> AstrometricSpatialCatalogPlace<S>
+    -> VacuumObservedSpatialCatalogPlace<S>
+    -> ObservedSpatialCatalogPlace<S>
+
+finite solar-system body
+    -> ReceptionLightTime<Bcrs, S>
+    -> VacuumObservedPlace<S>
+         |-> VacuumApparentDisk<S>
+         `-> ObservedPlace<S>
+
+geocentric Sun
+    -> SolarApparentPlace<S>
+    -> SolarTimeSolution<S>
 ```
 
 每个转换方法只接受合法的前置阶段，阶段类型直接防止重复修正。逆向计算使用独立命名结果，避免伪装成无损逆变换。
 
 高层结果只保存完成后续计算所需的主值和强类型语义，包括参考系、原点、时间尺度、历元及是否含折射。数值迭代结果可以包含残差、次数和最终括区间。
 
+- `StandardUncertainty<Q>`：绑定原物理量 `Q` 的有限非负一倍标准不确定度，并保留该量的规范单位；它只表达结果拥有的单项误差证据，不暗示独立、Gaussian、完整协方差、系统误差或模型差异已经建模。
+- `CorrelationMatrix<N>`：有限、对称、半正定且对角线为一的无量纲相关矩阵。它只表达系数；参数顺序和单位由拥有它的领域结果定义。
+- `SpatialCatalogCovariance`：有限距离六参数星表解的完整协方差，固定顺序为 $\alpha*$、$\delta$、$\varpi$、$\mu_{\alpha *}$、$\mu_\delta$、$v_r$；前三项使用 rad，自行使用 rad/s，径向速度使用 m/s。$\alpha*$ 只表示当前历元局部切平面微分 $d\alpha\cos\delta$，不是可跨天球使用的全局坐标。
+- `SpatialCatalogPlaceWithCovariance`：一个物理 `SpatialCatalogPlace` 及其同历元协方差。历元传播围绕同一 SOFA `starpm` 模型在输入和输出局部切平面求五点数值 Jacobian，以 $J C J^\mathsf{T}$ 传播并保留 Jacobian 作为数值证据；天极的 $\alpha*$ 基奇异性必须显式拒绝。
+- `EarthAttitudeStandardUncertainties`：地球姿态结果上逐字段可缺失的 IERS 源标准不确定度。C04 最终值保留源记录误差；`finals2000A` 仅对实际采用的 Bulletin A 值保留 A 误差，采用 Bulletin B 时不错误绑定 A 误差。区间内采用相关性未知的线性上界并以 `UncertaintyOrigin` 标识，任一端缺值则结果继续缺失。
+
 - `ReceptionLightTime<Bcrs, S>`：目标在发射历元、观测者在接收历元求值后的自由相对位置；保存双历元、自然视线方向、距离、单程光行时、迭代次数和时间残差，不提供跨历元相减得到的伪速度。
 - `FixedObserverAt<S>`：一个 `FixedSite` 在单一接收历元的可复用天测上下文，冻结同一次完整 EOP 求值、`TopocentricFrame<S>`、地球历表状态、站点质心位置/速度及 SOFA 星无关光行差参数。构造要求完整 `EarthOrientationTable`；同站点同历元的多个有限目标可复用该值。
-- `VacuumObservedPlace<S>`：有限太阳系目标的站心真空观测结果，保存接收/发射双历元、CIRS 中间赤道方向、局部 `HorizontalDirection`、距离、光行时及收敛诊断。当前链应用站心视差、由地球公转与站点运动共同产生的相对论光行差、IAU 2006/2000A 地球姿态和极移；明确不包含大气折射、Shapiro 延迟与点质量引力偏折。
-- `SolarApparentEcliptic<S>`：太阳的地心接收视方向，经收敛光行时和地球公转周年光行差后表达在接收历元的 `TrueEclipticEquinoxOfDate` 轴上；保存双历元及光行时诊断，不暗示站心、周日光行差、折射或引力偏折。
+- `ParallaxMeasurement`：星表拟合得到的有符号周年视差及非负标准不确定度；零或负中心值仍是有效测量，但 `try_physical` 必须失败，不能隐式产生距离。
+- `Parallax`：严格为正且有限的物理周年视差；与 `ParallaxMeasurement` 分离，使噪声测量和可用于空间运动的距离参数不会混淆。
+- `CatalogRadialVelocity`：太阳系质心处的天体测量径向速度，正值表示退行；不把光学、射电或相对论光谱速度定义隐式混用。
+- `InfiniteCatalogPlace`：一个明确受限的无限远 ICRS 星表位置，保存 TCB 参考历元、赤经/赤纬及 `CatalogProperMotion`。后者固定采用 $\mu_{\alpha *}=\dot{\alpha}\cos\delta$ 与 365.25 日 TCB 儒略年；该输入以类型表达零视差和零径向速度。
+- `SpatialCatalogPlace`：物理有限距离的六参数 ICRS 星表位置，组合 TCB 参考历元、赤经/赤纬、`CatalogProperMotion`、正 `Parallax` 与 `CatalogRadialVelocity`。`propagate_to` 使用 SOFA `starpm` 联合传播视差、自行和径向速度，包含直线空间运动、变化光行时造成的透视效应及 Stumpff 特殊相对论调整；SOFA 的距离替换、超速清零或不收敛回退均被显式拒绝。
+- `BarycentricCatalogState`：与 ICRS 对齐、以 SSB 为原点并绑定 TCB 历元的非零亚光速三维位置速度。它通过 SOFA `starpv` / `pvstar` 与 `SpatialCatalogPlace` 双向转换，也可按恒定惯性速度传播；它不是太阳系天体的 `RelativeState`。
+- `ApparentMagnitude<B, Z>`：同时以类型参数绑定光度通带 `B` 和星等系统 `Z` 的有限视星等；负值合法，不同通带或零点约定不能直接求差。`MagnitudeDifference` 表示有向星等差，`FluxRatio` 表示严格正的同带通量比，并按 Pogson 关系双向换算。Johnson V 与 Vega、AB、ST 只定义光度语义，不伪造未实现的绝对通量标定。
+- `AstrometricCatalogPlace<S, C>`：使用 SOFA `pmpx` 在 SSB 处把由 `C` 保留的星表语义传播到观测时刻的 ICRS 方向，并保存 TCB 观测历元及经过的儒略年。默认 `C = InfiniteCatalogPlace`；`AstrometricSpatialCatalogPlace<S>` 是 `C = SpatialCatalogPlace` 的别名。非零 $\mu_{\alpha *}$ 在天极无法转换为坐标赤经率时显式报错。
+- `VacuumObservedCatalogPlace<S, C>`：由同历元 `FixedObserverAt<S>` 接受相应 `AstrometricCatalogPlace<S, C>` 后产生。链依次应用观测者相关 Roemer 项、有限源的周年及周日视差、SOFA `ldsun` 太阳远源偏折、组合站点速度光行差、IAU 2006/2000A BPN、地球自转、极移和真空地平投影，并分别保存 Roemer、视差、偏折和光行差角修正。空间源别名为 `VacuumObservedSpatialCatalogPlace<S>`；该星表链不伪造太阳系目标式发射历元或迭代光行时。
+- `ObservedCatalogPlace<S, C>`：消耗相应真空星表结果并显式应用同一 SOFA 大气折射模型；没有再次应用折射的方法。空间源别名为 `ObservedSpatialCatalogPlace<S>`。
+- `VacuumObservedPlace<S>`：有限太阳系目标的站心真空观测结果，保存接收/发射双历元、CIRS 中间赤道方向、局部 `HorizontalDirection`、距离、光行时、有限距离太阳单极偏折诊断及收敛诊断。当前链应用站心视差、太阳不透明盘面判断、太阳单极偏折、由地球公转与站点运动共同产生的相对论光行差、IAU 2006/2000A 地球姿态和极移；明确不包含大气折射或 Shapiro 延迟。
+- `SphericalBodyFigure`：一个物理天体、正半径与版本化模型标识的不可拆分组合。内置形状只提供 IAU 2015 名义太阳球和 IAU WGCCRE 2015 月球参考球；系统质心不能拥有物理表面。
+- `VacuumApparentDisk<S>`：由 `VacuumObservedPlace<S>` 和同目标 `SphericalBodyFigure` 派生的圆形真空视盘，使用收敛距离和精确 `asin(R/Δ)` 视半径。它保留中心、模型与全视直径；同站点同历元视盘可比较中心角距、带符号边缘间隙和重叠拓扑，但不伪装成含大气差分折射的盘面。
+- `HorizonCriterion`：升落搜索的受检判据，把中心参考高度、`Vacuum`/`Refracted(AtmosphericConditions)` 坐标阶段和 `HorizonDiskPoint::{Center, UpperLimb, LowerLimb}` 绑定为一个值。球形盘面边缘在每次求值时按 `SphericalBodyFigure` 与收敛站心距离动态计算视半径；折射盘面判据只在中心应用所选折射模型，再把真空球形视半径作为垂直偏移，不伪造大气差分折射造成的盘面压缩。
+- `ObservedPlace<S>`：由 `VacuumObservedPlace<S>::apply_refraction` 消耗真空阶段后产生，保存来源真空结果、折射后 `HorizontalDirection`、调用者显式提供的 `AtmosphericConditions`，以及带 SOFA 模型适用范围分类的 `RefractionCorrection`。该结果类型不公开再次应用折射的方法，编译期阻止重复修正。
+- `AtmosphericConditions`：一次观测的不可变气象与波段输入，由强类型气压、摄氏温度、相对湿度和微米波长组成；不属于永久站点身份。零气压显式表示真空，不存在隐式标准大气。
+- `GeocentricApparentPlace<S>`：有限太阳系目标相对地心的接收视位置。地球固定在接收历元，目标迭代到发射历元；结果应用光线近太阳历元的有限源太阳单极偏折、地球质心周年光行差和 IAU 2006/2000A 方向链，并同时保留目标身份、完整 `ReceptionLightTime<S>`、GCRS、`TrueEquatorEquinoxOfDate`、`TrueEclipticEquinoxOfDate`、太阳偏折处置和收敛诊断。它不包含站心视差、周日光行差、折射或 Shapiro 延迟。
+- `SolarApparentPlace<S>`：`GeocentricApparentPlace<S>` 的太阳专用视图；保留相同方向、双历元、距离和诊断，并明确记录太阳不会由自身点质量模型发生自偏折。
+- `MeanSolarTime`：由 UT1 日内分数和东正经度定义的名义 24 小时钟面读数；不是 UTC、时区或民用日期时间。
+- `ApparentSolarTime`：真太阳当地时角加 12 小时所得的名义 24 小时钟面读数；不是匀速时间尺度。
+- `EquationOfTime`：同一经度的 `ApparentSolarTime − MeanSolarTime`，以 `(-12h, 12h]` 内的有符号 `Duration` 保存；正值表示真太阳领先，经度不改变该差值。
+- `SolarTimeSolution<S>`：同一物理历元的 `SolarApparentPlace<S>`、`SiderealTimeSolution<S>`、格林尼治平/真太阳时和时差的不可变组合；地方太阳时只应用同一个东正经度偏移，不引入 UTC offset 或时区规则。
 - `EventEvidence<S>`：事件精化后的物理时间括区间、半宽时刻不确定度、有符号判据残差、迭代次数和求值次数。
-- `SolarTermEvent<S>`：太阳地心视黄经到达一个规定 $15^\circ$ 网格位置的事件，保留完整 `SolarApparentEcliptic<S>` 与事件证据。
+- `ExtremumEvidence<S>`：有界 Brent 极值精化后的最终时间括区间、半宽时刻不确定度、迭代次数和累计天测求值次数；物理目标值由具体事件结果保存，不把角度、长度或坐标压成同一裸标量结果。
+- `RelativeBodyQuery`：两个不同天体、明确的“目标减参考”次序及 `Geometric`/`Apparent` 求值模式的受检组合。地心或固定站点不是该组合的隐式默认值，而由所调用的 `Events` 工作流选择并在结果的 `ObservationOrigin` 中保留。
+- `ConfigurationEvent<S>`：一个合、冲或东方/西方照事件，保留判据所用的日期真黄经差或日期真赤经差、两天体的完整 `EventBodyPosition<S>`、观测原点和 `EventEvidence<S>`。太阳参考合事件可由同一观测原点到目标和太阳的实际距离进一步分类为内合或外合。
+- `GreatestElongationEvent<S>`：两个天体真实球面角距的局部极大值，保留目标位于参考天体东侧/西侧的分支、两天体位置和 `ExtremumEvidence<S>`。`StationEvent<S>` 则保留日期真黄经率过零前后的运动方向、角速度残差和单独的 `StationEvidence<S>`。
+- `AngularSeparationExtremumEvent<S>`、`DistanceExtremumEvent<S>`、`CoordinateExtremumEvent<S>` 与 `CoordinateCrossingEvent<S>`：分别表达真实球面角距极值、同时几何天体间距离极值、日期真黄纬/赤纬极值和这些坐标的升/降交越；不同物理量不共用裸 `f64` 事件结果。
+- `SolarTermEvent<S>`：太阳地心视黄经到达一个规定 $15^\circ$ 网格位置的事件，保留完整 `SolarApparentPlace<S>` 与事件证据。
 - `SolarTermYear`：由固定 UTC 偏移定义公历年归属并按当地民用时间排序的 24 个 `SolarTermYearEntry`；每项同时保存 UTC 物理事件和固定偏移公历标签。
 
 ## 4. 上下文与工作流
@@ -213,10 +259,12 @@ CatalogPlace<F>
 
 - `TimeContext<'a, E>` 拥有闰秒策略，并用类型参数 `E` 表达地球自转数据能力；`with_earth_rotation` 接收只含 `UT1−UTC` 的 `EarthRotationTable`，`with_earth_attitude` 接收方向旋转所需的 `EarthAttitudeTable`，`with_earth_orientation` 接收完整 `EarthOrientationTable`。`resolve_fixed`/`represent_fixed` 在同一闰秒策略下转换 `CivilDateTime`，不引入时区数据库。所有输入数据都必须已经验证、不可变且版本化。
 - `Frames` 借用一个具备相应数据能力的 `TimeContext`。任意时间上下文都可通过 `celestial_orientation_at` 只用 TT 生成带历元的 `CelestialOrientationSolution`；任一 UT1 上下文都可通过 `sidereal_time_at` 生成 `SiderealTimeSolution`；姿态上下文通过 `earth_attitude_at` 执行方向链；只有完整 EOP 上下文公开带速度的 `earth_orientation_at`、`at` 和 `transform`。观测地球定向主路径是 `GCRS → CIRS → TIRS → ITRS`：IAU 2006/2000A CIP/CIO 模型加入 EOP `dX/dY`，ERA 使用 UT1，极移使用 `xp/yp` 与 TIO locator `s′`；状态变换还要求 LOD 与可用的 EOP 变化率，方向旋转不伪造这些导数。
-- `Earth` 绑定一个显式 `ReferenceEllipsoid`，提供测地坐标与 `Point3<Itrs>` 的双向转换、地心纬度、固定站点、ITRS ENU/NED 基，以及经完整 EOP 链求得的 `TopocentricFrame<S>`。地心原点、无效椭球和空站点标识均明确失败。
+- `Earth` 绑定一个显式 `ReferenceEllipsoid`，提供测地坐标与 `Point3<Itrs>` 的双向转换、地心纬度、固定站点和 ITRS ENU/NED 基。`topocentric_frame_at` 由完整 EOP 状态变换产生 `TopocentricFrame<S>`；`topocentric_frame_with_nominal_rotation_at` 保留姿态表的 UT1、极移和天极偏差，并显式以 IERS 名义角速度产生站点惯性速度。结果携带 `SiteVelocityModel`，不把缺失 LOD 伪造成观测值。地心原点、无效椭球和空站点标识均明确失败。
 - `Ephemeris` 拥有冻结顺序的本地内核清单和查询能力，不隐式联网。`EphemerisQuery<F, S>` 同时固定目标、中心、物理历元和参考轴；结果为 `RelativeState<F, S>`，以自由位置/速度向量表达目标相对中心，不把动态中心伪装成 `Point3<Bcrs>` 的固定 SSB 原点。
-- `Astrometry<'context, 'ephemeris, E>` 显式借用 `TimeContext` 与 `Ephemeris`。`fixed_observer_at(&site, epoch)` 只在完整 EOP 上下文存在，返回可批量复用的 `FixedObserverAt<S>`；其 `vacuum_observed_place(target, options)` 按“站点接收状态 → 目标发射时刻迭代 → 站心自然视线 → SOFA 相对论光行差 → CIRS → 同一历元 ENU 地平投影”执行有限目标链。地心太阳视黄经链保持为独立语义。上下文不隐式联网或选择历表。
-- `Events` 当前以 `Astrometry` 为唯一真实计算上下文；`solar_terms_in` 在闭时间区间内连续化周期黄经、扫描括根并用 Brent 精化，`solar_term_year` 再以显式固定 UTC 偏移选择并标记恰好 24 个事件。通用任意判据接缝留到月相这一第二个真实工作流出现后再稳定。
+- `Astrometry<'context, 'ephemeris, E>` 显式借用 `TimeContext` 与 `Ephemeris`。`geocentric_apparent_place(target, epoch, options)` 对任意受历表支持的有限太阳系目标执行“地球接收状态 → 目标发射时刻迭代 → 地心自然视线 → 光线近太阳历元与有限源太阳单极偏折/遮挡判断 → 地球质心周年光行差 → GCRS/日期真赤道/日期真黄道”链；`solar_apparent_place` 是同一实现的太阳专用视图，`lunar_illumination_at` 则组合月—地、日—地和日—月三条收敛光行时，在月球发射事件上计算物理相位角与球形月面照亮比例，同时保留地球接收历元的日月视角距、有向视黄经差和盈亏分支。具备 UT1 的上下文还可由 `solar_time` 将太阳视位置与 GAST 组合为平/真太阳时及时差。完整 EOP 上下文通过 `fixed_observer_at(&site, epoch)` 使用观测 LOD/帧率；不含 LOD 的姿态上下文必须显式调用 `fixed_observer_with_nominal_rotation_at`，结果的 `SiteVelocityModel` 标记名义自转率。两者都返回可批量复用的 `FixedObserverAt<S>`；它分别以 `vacuum_observed_catalog_place`、`vacuum_observed_spatial_catalog_place` 和 `vacuum_observed_place` 接受无限远星表源、六参数空间星表源和有限太阳系目标，三条链共享站点状态但不混淆视差及光行时语义。有限太阳系目标路径在地心链之外加入站点接收状态、站心视差、周日光行差、CIRS 和同一历元 ENU 地平投影。上下文不隐式联网或选择历表。
+- `HorizonsCompatibleLunarV`：只消费已完成的 `LunarIllumination<S>`，以日—月照明腿距离、月—地接收腿距离和月球处物理相位角计算地心、无大气、假定未受地影衰减的积分月面 Johnson V/Vega 星等。`GeocentricLunarVMagnitude<S>` 保留原始照明几何、距离与相位星等项、模型标识和 `LunarVApplicability`；后者显式区分正常区、相位角小于 $7^\circ$ 的已知模型偏差区，以及月面与地球本影/半影相交的月食区。月食区返回值只是未受食时的模型基线，不代表实际月食亮度。
+- `Events` 以 `Astrometry` 为唯一真实计算上下文。`solar_terms_in` 连续化太阳视黄经并搜索 $15^\circ$ 网格；`moon_phase_angle_in` 连续化月球减太阳的视黄经差并搜索调用者给出的强类型 `MoonPhaseAngle`，`moon_phases_in` 则在一次扫描中搜索 $0^\circ/90^\circ/180^\circ/270^\circ$ 四个目标，并把同一 `MoonPhaseAngleEvent` 内核包装为命名主相位。`configurations_in` 搜索合、冲和方照，`greatest_elongations_in` 搜索角距极大，`stations_in` 搜索视赤经率过零；角距、物理距离、日期真黄纬/赤纬的极值和交越由各自命名工作流承担。除同时几何天体间距离外，这些事件均有地心入口；完整 EOP 上下文另提供固定站点入口并复用 `FixedObserverAt` 的站心视位置链。根事件共享 `AngularEventSearchOptions`、`EventEvidence` 和内部括根/Brent 精化，极值事件共享 `ExtremumSearchOptions`、`ExtremumEvidence` 和内部有界 Brent 精化，但每项保留自己的领域查询、结果类型与物理量。`solar_term_year` 和 `moon_phase_year` 再以显式固定 UTC 偏移筛选公历年份。模块不公开任意谓词框架，避免调用者重建视位置链或丢失时间尺度、模型和数值证据。
+- `MeasuredCycle<K, S>` 只由相邻同类物理事件构成，保留强类型周期种类、首尾 `CycleBoundary<S>`、实际 `Duration`、搜索证据、参考轴和冻结的 `KernelManifest`；`CycleStatistics<K>` 只接收这些完整周期。`Events` 分别公开分点年、恒星年、近点年、交点年及五种月球月周期工作流：固定 J2000 黄道用于恒星周期，日期平均黄道用于回归月与交点事件，径向速度负到正的根定义近地点/近日点。`ModeledCycle<TropicalYear, S>` 与事件测量类型分离，保留求值历元、模型标识和适用范围。
 
 调用者学习高层任务接口即可完成标准路径：
 
@@ -232,6 +280,8 @@ let tirs: State<Tirs, Utc> = Frames::new(&time_with_eop).transform(cirs)?;
 let observer = astrometry.fixed_observer_at(&site, utc)?;
 let sun = observer.vacuum_observed_place(CelestialBody::Sun, options)?;
 let horizontal = sun.horizontal();
+let disk = sun.apparent_disk(SphericalBodyFigure::IAU_2015_NOMINAL_SUN)?;
+let angular_diameter = disk.diameter();
 ```
 
 底层标准算法保留在模块内部或专家子模块。SOFA、hifitime 和 ANISE 的调用顺序及数据布局不进入公开接口。

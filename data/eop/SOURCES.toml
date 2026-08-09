@@ -1,4 +1,4 @@
-snapshot_date = "2026-08-06"
+snapshot_date = "2026-08-09"
 
 [c04]
 product = "IERS EOP 20u24 C04, IAU 2000A dX/dY, 0h UTC"
@@ -13,7 +13,7 @@ mjd_end = 61228.0
 product = "IERS finals.all, IAU 2000A"
 source = "https://datacenter.iers.org/data/latestVersion/finals.all.iau2000.txt"
 format = "https://maia.usno.navy.mil/ser7/readme.finals2000A"
-file = "finals2000a-2026-08-06.all"
+file = "finals2000a-2026-08-09.all"
 sha256 = "9707981f01b21bf8ef09b47381fd615f4fad793dddaf5bf357fb0e2ea00f5861"
 rows = 19998
 mjd_start = 41684.0

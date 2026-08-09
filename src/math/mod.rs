@@ -4,6 +4,7 @@ mod angle;
 mod error;
 mod matrix;
 mod numeric;
+mod photometry;
 mod quantity;
 mod rotation;
 mod sexagesimal;
@@ -17,6 +18,10 @@ pub use angle::{
 pub use error::Error;
 pub use matrix::Matrix3;
 pub use numeric::{RootOptions, RootResult};
+pub use photometry::{
+    Ab, ApparentMagnitude, FluxRatio, JohnsonV, MagnitudeDifference, MagnitudeSystem,
+    PhotometricPassband, St, Vega,
+};
 pub use quantity::{Acceleration, AngularSpeed, Coordinate, Dimensionless, Length, Speed, Squared};
 pub use rotation::{Quaternion, Rotation, RotationTolerance};
 pub use sexagesimal::{DegreesMinutesSeconds, HoursMinutesSeconds, SexagesimalSign};

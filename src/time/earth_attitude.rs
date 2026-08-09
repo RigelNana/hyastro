@@ -1,9 +1,82 @@
+use crate::uncertainty::{StandardUncertainty, UncertaintyOrigin};
+
 use crate::math::Angle;
 
 use super::{
     CelestialPoleOffsetX, CelestialPoleOffsetY, Duration, Error, Instant, LeapSeconds,
     PolarMotionX, PolarMotionY, Tai, TimeScale, Ut1MinusUtc, Utc,
 };
+
+/// Source standard uncertainties associated with Earth-attitude values.
+///
+/// Missing fields stay explicit. The values describe the upstream estimates
+/// only; they do not include interpolation error or model discrepancy.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct EarthAttitudeStandardUncertainties {
+    ut1_minus_utc: Option<StandardUncertainty<Duration>>,
+    polar_motion_x: Option<StandardUncertainty<Angle>>,
+    polar_motion_y: Option<StandardUncertainty<Angle>>,
+    celestial_pole_offset_x: Option<StandardUncertainty<Angle>>,
+    celestial_pole_offset_y: Option<StandardUncertainty<Angle>>,
+}
+
+impl EarthAttitudeStandardUncertainties {
+    /// Constructs a bundle from independently optional source uncertainties.
+    pub const fn new(
+        ut1_minus_utc: Option<StandardUncertainty<Duration>>,
+        polar_motion_x: Option<StandardUncertainty<Angle>>,
+        polar_motion_y: Option<StandardUncertainty<Angle>>,
+        celestial_pole_offset_x: Option<StandardUncertainty<Angle>>,
+        celestial_pole_offset_y: Option<StandardUncertainty<Angle>>,
+    ) -> Self {
+        Self {
+            ut1_minus_utc,
+            polar_motion_x,
+            polar_motion_y,
+            celestial_pole_offset_x,
+            celestial_pole_offset_y,
+        }
+    }
+
+    /// Returns a bundle with no reported uncertainties.
+    pub const fn none() -> Self {
+        Self::new(None, None, None, None, None)
+    }
+
+    /// Returns the `UT1−UTC` standard uncertainty.
+    pub const fn ut1_minus_utc(self) -> Option<StandardUncertainty<Duration>> {
+        self.ut1_minus_utc
+    }
+
+    /// Returns the polar-motion $x_p$ standard uncertainty.
+    pub const fn polar_motion_x(self) -> Option<StandardUncertainty<Angle>> {
+        self.polar_motion_x
+    }
+
+    /// Returns the polar-motion $y_p$ standard uncertainty.
+    pub const fn polar_motion_y(self) -> Option<StandardUncertainty<Angle>> {
+        self.polar_motion_y
+    }
+
+    /// Returns the celestial-pole $dX$ standard uncertainty.
+    pub const fn celestial_pole_offset_x(self) -> Option<StandardUncertainty<Angle>> {
+        self.celestial_pole_offset_x
+    }
+
+    /// Returns the celestial-pole $dY$ standard uncertainty.
+    pub const fn celestial_pole_offset_y(self) -> Option<StandardUncertainty<Angle>> {
+        self.celestial_pole_offset_y
+    }
+
+    /// Returns whether no field carries a standard uncertainty.
+    pub const fn is_empty(self) -> bool {
+        self.ut1_minus_utc.is_none()
+            && self.polar_motion_x.is_none()
+            && self.polar_motion_y.is_none()
+            && self.celestial_pole_offset_x.is_none()
+            && self.celestial_pole_offset_y.is_none()
+    }
+}
 
 /// One Earth-attitude observation at an exact UTC-tagged physical instant.
 ///
@@ -18,6 +91,7 @@ pub struct EarthAttitudeSample {
     polar_motion_y: PolarMotionY,
     celestial_pole_offset_x: CelestialPoleOffsetX,
     celestial_pole_offset_y: CelestialPoleOffsetY,
+    standard_uncertainties: EarthAttitudeStandardUncertainties,
 }
 
 impl EarthAttitudeSample {
@@ -36,8 +110,18 @@ impl EarthAttitudeSample {
             polar_motion_x,
             polar_motion_y,
             celestial_pole_offset_x,
+            standard_uncertainties: EarthAttitudeStandardUncertainties::none(),
             celestial_pole_offset_y,
         }
+    }
+    /// Associates source-reported standard uncertainties with this sample.
+    #[must_use]
+    pub const fn with_standard_uncertainties(
+        mut self,
+        standard_uncertainties: EarthAttitudeStandardUncertainties,
+    ) -> Self {
+        self.standard_uncertainties = standard_uncertainties;
+        self
     }
 
     /// Returns the sample epoch.
@@ -68,6 +152,11 @@ impl EarthAttitudeSample {
     /// Returns celestial-pole correction $dY$.
     pub const fn celestial_pole_offset_y(self) -> CelestialPoleOffsetY {
         self.celestial_pole_offset_y
+    }
+
+    /// Returns the source-reported standard uncertainties.
+    pub const fn standard_uncertainties(self) -> EarthAttitudeStandardUncertainties {
+        self.standard_uncertainties
     }
 }
 
@@ -214,6 +303,13 @@ impl<'a> EarthAttitudeTable<'a> {
         let ut1_minus_utc =
             Ut1MinusUtc::from_duration(ut1_minus_tai.checked_add(query_tai_minus_utc)?)?;
 
+        let (standard_uncertainties, standard_uncertainty_origin) =
+            Self::interpolate_standard_uncertainties(
+                left.standard_uncertainties,
+                right.standard_uncertainties,
+                fraction,
+            )?;
+
         Ok(EarthAttitude {
             epoch,
             ut1_minus_utc,
@@ -241,6 +337,8 @@ impl<'a> EarthAttitudeTable<'a> {
                 right.celestial_pole_offset_y.as_angle(),
                 fraction,
             )?),
+            standard_uncertainties,
+            standard_uncertainty_origin,
         })
     }
 
@@ -254,6 +352,93 @@ impl<'a> EarthAttitudeTable<'a> {
         Error::ensure_finite(field, value)?;
         Angle::from_radians(value).map_err(|_| Error::NonFinite { field, value })
     }
+
+    fn interpolate_standard_uncertainties(
+        left: EarthAttitudeStandardUncertainties,
+        right: EarthAttitudeStandardUncertainties,
+        fraction: f64,
+    ) -> Result<
+        (
+            EarthAttitudeStandardUncertainties,
+            Option<UncertaintyOrigin>,
+        ),
+        Error,
+    > {
+        if fraction == 0.0 {
+            return Ok((
+                left,
+                (!left.is_empty()).then_some(UncertaintyOrigin::SourceReported),
+            ));
+        }
+        if fraction == 1.0 {
+            return Ok((
+                right,
+                (!right.is_empty()).then_some(UncertaintyOrigin::SourceReported),
+            ));
+        }
+        let uncertainties = EarthAttitudeStandardUncertainties::new(
+            Self::interpolate_duration_uncertainty(
+                left.ut1_minus_utc,
+                right.ut1_minus_utc,
+                fraction,
+            )?,
+            Self::interpolate_angle_uncertainty(
+                left.polar_motion_x,
+                right.polar_motion_x,
+                fraction,
+            )?,
+            Self::interpolate_angle_uncertainty(
+                left.polar_motion_y,
+                right.polar_motion_y,
+                fraction,
+            )?,
+            Self::interpolate_angle_uncertainty(
+                left.celestial_pole_offset_x,
+                right.celestial_pole_offset_x,
+                fraction,
+            )?,
+            Self::interpolate_angle_uncertainty(
+                left.celestial_pole_offset_y,
+                right.celestial_pole_offset_y,
+                fraction,
+            )?,
+        );
+        let origin = (!uncertainties.is_empty())
+            .then_some(UncertaintyOrigin::CorrelationAgnosticLinearInterpolation);
+        Ok((uncertainties, origin))
+    }
+
+    fn interpolate_duration_uncertainty(
+        left: Option<StandardUncertainty<Duration>>,
+        right: Option<StandardUncertainty<Duration>>,
+        fraction: f64,
+    ) -> Result<Option<StandardUncertainty<Duration>>, Error> {
+        let (Some(left), Some(right)) = (left, right) else {
+            return Ok(None);
+        };
+        let value = (1.0 - fraction) * left.value().as_seconds_f64()
+            + fraction * right.value().as_seconds_f64();
+        Ok(Some(StandardUncertainty::from_validated(
+            Duration::from_seconds_f64(value)?,
+        )))
+    }
+
+    fn interpolate_angle_uncertainty(
+        left: Option<StandardUncertainty<Angle>>,
+        right: Option<StandardUncertainty<Angle>>,
+        fraction: f64,
+    ) -> Result<Option<StandardUncertainty<Angle>>, Error> {
+        let (Some(left), Some(right)) = (left, right) else {
+            return Ok(None);
+        };
+        let value =
+            (1.0 - fraction) * left.value().as_radians() + fraction * right.value().as_radians();
+        let angle = Angle::from_radians(value).map_err(|_| Error::NonFinite {
+            field: "interpolated Earth-attitude standard uncertainty",
+            value,
+        })?;
+        Ok(Some(StandardUncertainty::from_validated(angle)))
+    }
 }
 
 /// Earth-attitude values resolved at one physical instant.
@@ -265,6 +450,8 @@ pub struct EarthAttitude<S: TimeScale> {
     polar_motion_y: PolarMotionY,
     celestial_pole_offset_x: CelestialPoleOffsetX,
     celestial_pole_offset_y: CelestialPoleOffsetY,
+    standard_uncertainties: EarthAttitudeStandardUncertainties,
+    standard_uncertainty_origin: Option<UncertaintyOrigin>,
 }
 
 impl<S: TimeScale> EarthAttitude<S> {
@@ -276,6 +463,9 @@ impl<S: TimeScale> EarthAttitude<S> {
             polar_motion_y: sample.polar_motion_y,
             celestial_pole_offset_x: sample.celestial_pole_offset_x,
             celestial_pole_offset_y: sample.celestial_pole_offset_y,
+            standard_uncertainties: sample.standard_uncertainties,
+            standard_uncertainty_origin: (!sample.standard_uncertainties.is_empty())
+                .then_some(UncertaintyOrigin::SourceReported),
         }
     }
 
@@ -307,5 +497,19 @@ impl<S: TimeScale> EarthAttitude<S> {
     /// Returns interpolated celestial-pole correction $dY$.
     pub const fn celestial_pole_offset_y(self) -> CelestialPoleOffsetY {
         self.celestial_pole_offset_y
+    }
+
+    /// Returns available standard uncertainties for the resolved observations.
+    ///
+    /// Exact sample queries preserve source-reported values. Between samples
+    /// each available field is a correlation-agnostic linear upper bound. The
+    /// bundle excludes EOP interpolation error and model discrepancy.
+    pub const fn standard_uncertainties(self) -> EarthAttitudeStandardUncertainties {
+        self.standard_uncertainties
+    }
+
+    /// Returns how the available standard uncertainties were obtained.
+    pub const fn standard_uncertainty_origin(self) -> Option<UncertaintyOrigin> {
+        self.standard_uncertainty_origin
     }
 }
