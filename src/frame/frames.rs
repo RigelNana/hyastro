@@ -1,5 +1,5 @@
 use crate::time::{
-    EarthAttitudeTable, EarthOrientationTable, Instant, JulianDate, TimeContext, TimeScale,
+    EarthAttitudeModel, EarthOrientationTable, Instant, JulianDate, TimeContext, TimeScale,
     TimeScaleModel, Tt, Ut1,
 };
 
@@ -73,8 +73,8 @@ impl<'context, 'leap, E> Frames<'context, 'leap, E> {
     }
 }
 
-impl<'context, 'leap, 'eop> Frames<'context, 'leap, EarthAttitudeTable<'eop>> {
-    /// Evaluates one coherent observed Earth-attitude solution.
+impl<'context, 'leap, E: EarthAttitudeModel> Frames<'context, 'leap, E> {
+    /// Evaluates one coherent tabulated or predicted Earth-attitude solution.
     ///
     /// The result can rotate directions through GCRS/CIRS/TIRS/ITRS without
     /// requiring length of day or frame-rate observations.

@@ -10,6 +10,10 @@ pub enum Error {
     #[error(transparent)]
     Math(#[from] crate::math::Error),
 
+    /// A time-scale model could not represent the requested epoch.
+    #[error(transparent)]
+    Time(#[from] crate::time::Error),
+
     /// A state for one body relative to itself contained a non-zero value.
     #[error("state for {body} relative to itself must have zero position and velocity")]
     NonZeroIdentityState {
@@ -55,6 +59,30 @@ pub enum Error {
         body: CelestialBody,
         /// Rejected radius in metres.
         metres: f64,
+    },
+
+    /// An ephemeris provider supplied an empty stable model identifier.
+    #[error("ephemeris model identifier must not be empty")]
+    EmptyModelIdentifier,
+
+    /// A provider does not model one body required by a query.
+    #[error("{provider} does not provide a state for {body}")]
+    UnsupportedBody {
+        /// Body unavailable from the selected provider.
+        body: CelestialBody,
+        /// Stable provider or model identifier.
+        provider: &'static str,
+    },
+
+    /// An analytical ephemeris failed while evaluating one supported body.
+    #[error("{provider} failed while evaluating {body} (status {status})")]
+    AnalyticalModelFailure {
+        /// Body whose analytical state could not be evaluated.
+        body: CelestialBody,
+        /// Stable provider or model identifier.
+        provider: &'static str,
+        /// Stable status reported by the analytical implementation.
+        status: i32,
     },
 
     /// No kernels were supplied to an ephemeris.
@@ -128,8 +156,7 @@ pub enum Error {
         center: CelestialBody,
     },
 
-    /// The requested physical epoch was outside loaded coverage.
-    #[cfg(feature = "anise")]
+    /// The requested physical epoch was outside provider coverage.
     #[error(
         "no ephemeris coverage for {target} relative to {center} at {epoch_tai_nanoseconds} TAI ns"
     )]
@@ -140,6 +167,17 @@ pub enum Error {
         center: CelestialBody,
         /// Requested physical epoch as TAI nanoseconds since 1900-01-01 TAI.
         epoch_tai_nanoseconds: i128,
+    },
+
+    /// A provider reported a coverage interval whose end precedes its start.
+    #[error(
+        "invalid ephemeris coverage interval: {start_tai_nanoseconds}..={end_tai_nanoseconds} TAI ns"
+    )]
+    InvalidCoverageInterval {
+        /// Inclusive start as TAI nanoseconds since 1900-01-01 TAI.
+        start_tai_nanoseconds: i128,
+        /// Inclusive end as TAI nanoseconds since 1900-01-01 TAI.
+        end_tai_nanoseconds: i128,
     },
 
     /// A selected SPK segment used axes that cannot be represented as BCRS.

@@ -9,7 +9,7 @@ license = "MIT"
 [features]
 default = ["std"]
 anise = ["std", "hifitime", "dep:anise"]
-std = ["dep:garde", "dep:sofars", "jiff?/std", "hifitime?/std"]
+std = ["dep:garde", "dep:sofars", "hifitime", "hifitime?/std", "jiff?/std"]
 jiff = ["dep:jiff"]
 hifitime = ["dep:hifitime"]
 
@@ -69,6 +69,26 @@ name = "current_solar_position"
 required-features = ["anise", "jiff"]
 
 [[example]]
+name = "analytic_solar_position"
+required-features = ["std"]
+
+[[example]]
+name = "analytic_planetary_events"
+required-features = ["std"]
+
+[[example]]
+name = "analytic_local_solar_eclipse"
+required-features = ["std"]
+
+[[example]]
+name = "analytic_global_solar_eclipses"
+required-features = ["std"]
+
+[[example]]
+name = "analytic_lunar_eclipses"
+required-features = ["std"]
+
+[[example]]
 name = "solar_apparent_position"
 required-features = ["anise"]
 
@@ -107,3 +127,7 @@ required-features = ["anise"]
 [[example]]
 name = "astronomical_clock"
 required-features = ["anise", "jiff"]
+
+[[example]]
+name = "lunar_orientation_field_rotation"
+required-features = ["anise"]

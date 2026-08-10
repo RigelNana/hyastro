@@ -116,7 +116,7 @@ impl PolarMotionX {
         self.0.as_radians() / RADIANS_PER_ARCSECOND
     }
 
-    pub(crate) fn from_angle(angle: Angle) -> Self {
+    pub(crate) const fn from_angle(angle: Angle) -> Self {
         Self(angle)
     }
 }
@@ -141,7 +141,7 @@ impl PolarMotionY {
         self.0.as_radians() / RADIANS_PER_ARCSECOND
     }
 
-    pub(crate) fn from_angle(angle: Angle) -> Self {
+    pub(crate) const fn from_angle(angle: Angle) -> Self {
         Self(angle)
     }
 }
@@ -167,7 +167,7 @@ impl CelestialPoleOffsetX {
         self.0.as_radians() / RADIANS_PER_ARCSECOND * MILLIARCSECONDS_PER_ARCSECOND
     }
 
-    pub(crate) fn from_angle(angle: Angle) -> Self {
+    pub(crate) const fn from_angle(angle: Angle) -> Self {
         Self(angle)
     }
 }
@@ -193,7 +193,7 @@ impl CelestialPoleOffsetY {
         self.0.as_radians() / RADIANS_PER_ARCSECOND * MILLIARCSECONDS_PER_ARCSECOND
     }
 
-    pub(crate) fn from_angle(angle: Angle) -> Self {
+    pub(crate) const fn from_angle(angle: Angle) -> Self {
         Self(angle)
     }
 }

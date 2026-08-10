@@ -77,7 +77,15 @@ fn de440_measures_all_year_and_month_cycle_definitions() {
     assert!(draconic_years.len() >= 3);
     for cycle in &equinox {
         assert!((365.20..365.30).contains(&days(cycle.duration().as_seconds_f64())));
-        assert_eq!(cycle.model().ephemeris().kernel_count(), 1);
+        assert_eq!(
+            cycle
+                .model()
+                .provenance()
+                .kernel_manifest()
+                .unwrap()
+                .kernel_count(),
+            1
+        );
         assert!(cycle.start().instant() < cycle.end().instant());
     }
     for cycle in &sidereal_years {

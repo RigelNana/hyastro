@@ -2,7 +2,7 @@ use std::vec::Vec;
 
 use crate::{
     earth::FixedSite,
-    ephem::CelestialBody,
+    ephem::{CelestialBody, EphemerisProvider},
     math::Altitude,
     time::{EarthOrientationTable, Instant, TimeInterval, TimeScale},
 };
@@ -126,7 +126,9 @@ impl<S: TimeScale> TwilightSearch<S> {
     }
 }
 
-impl<'context, 'data, 'eop> Events<'context, 'data, EarthOrientationTable<'eop>> {
+impl<'context, 'data, 'eop, P: EphemerisProvider + ?Sized>
+    Events<'context, 'data, EarthOrientationTable<'eop>, P>
+{
     /// Finds every dawn and dusk crossing for one twilight level.
     pub fn twilight_events_in<S: TimeScale>(
         &self,

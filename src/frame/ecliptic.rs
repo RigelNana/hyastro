@@ -23,7 +23,7 @@ use super::{EquatorialDirection, Icrs, MeanEclipticEquinoxJ2000};
 pub struct EclipticLongitude(f64);
 
 impl EclipticLongitude {
-    #[cfg(feature = "anise")]
+    #[cfg(feature = "std")]
     pub(crate) const fn from_validated_radians(value: f64) -> Self {
         Self(value)
     }

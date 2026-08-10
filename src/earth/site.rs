@@ -4,7 +4,7 @@ use crate::{
         HorizontalDirection, Itrs, State, StateTransform,
     },
     math::{Direction, Point3, Speed, Vector3},
-    time::{EarthAttitudeTable, EarthOrientationTable, Instant, TimeScale},
+    time::{EarthAttitudeModel, EarthOrientationTable, Instant, TimeScale},
 };
 
 use super::{Earth, Error, GeodeticPosition, ReferenceEllipsoid};
@@ -305,17 +305,17 @@ impl FixedSite {
         self.topocentric_frame_from_orientation(frames.earth_orientation_at(epoch)?)
     }
 
-    /// Evaluates a runtime topocentric frame using observed attitude and nominal Earth rotation.
+    /// Evaluates a runtime topocentric frame using selected attitude and nominal Earth rotation.
     ///
-    /// This explicit fallback requires `UT1−UTC`, polar motion, and celestial-pole
+    /// This explicit fallback requires Delta T, polar motion, and celestial-pole
     /// offsets, but not length of day. Position and local axes use the complete
-    /// observed attitude. Site velocity uses the IERS conventional nominal Earth
+    /// selected attitude. Site velocity uses the IERS conventional nominal Earth
     /// angular speed and therefore does not claim an observed rotation-rate
     /// correction.
-    pub fn topocentric_frame_with_nominal_rotation_at<S: TimeScale>(
+    pub fn topocentric_frame_with_nominal_rotation_at<S: TimeScale, E: EarthAttitudeModel>(
         &self,
         epoch: Instant<S>,
-        frames: &Frames<'_, '_, EarthAttitudeTable<'_>>,
+        frames: &Frames<'_, '_, E>,
     ) -> Result<TopocentricFrame<S>, Error> {
         self.topocentric_frame_from_attitude_with_nominal_rotation(frames.earth_attitude_at(epoch)?)
     }

@@ -92,7 +92,7 @@
 - `tttdb`/`tdbtt` **不计算模型**，只应用调用者提供的 `dtr = TDB−TT` 秒数。`dtdb(date1, date2, ut, elong, u, v)` 才提供 Fairhead–Bretagnon 完整地心级数加 Moyer/Murray 站心近似；它需要 TDB/TT 日期、UT1 日小数、经度及观测者相对地轴/赤道面的距离。上游文档给出的 1950–2050 绝对精度为相对 DE405 数值积分优于约 ±3 ns；最终高精度关系仍应由太阳系历表数值积分决定（`src/ts/dtdb.rs`）。
 - UTC↔TAI/UT1 路径调用 `ts::dat` 的 SOFA 内嵌 UTC 历史。该数据策略与 hyastro 的版本化 `LeapSeconds` 不同，因此只适合作为对照，不得接管 hyastro 的 UTC 标签语义。
 
-**数据依赖**：[观察] 无运行时数据文件；所有级数系数与闰秒表（`ts/dat.rs`）内嵌在源码中。历表只覆盖地球（epv00）、月球（moon98）、冥王星（plan94）——与 SOFA C 一致，不提供其余行星位置。
+**数据依赖**：[观察] 无运行时数据文件；所有级数系数与闰秒表（`ts/dat.rs`）内嵌在源码中。历表覆盖地球（epv00）、月球（moon98）和水星至海王星的行星系统（plan94，其中 `np=3` 为地月质心，不是地球；不含冥王星）——与 SOFA C 一致。
 
 **精度依据**：[观察] README 声称 "Strictly follows IAU 2000/2006 models, ensuring numerical consistency with the original SOFA C library"（`ref/sofars/README.md:15`）。测试以 SOFA 官方验证程序 `t_sofa_c.c` 的容差体系复刻：`tests/common/mod.rs` 实现 `vvd`（double 值容差校验）与 `viv`（整型校验），每个测试用例的期望值直接取自 SOFA C 官方值（例：`ref/sofars/tests/astro_test.rs` 中 `vvd(res[0], 1.234087484501017061, 1e-12, "pmsafe", "ra2")`）。
 

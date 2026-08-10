@@ -1,11 +1,11 @@
 use core::{f64::consts::TAU, fmt, marker::PhantomData};
-use std::{sync::Arc, vec::Vec};
+use std::vec::Vec;
 
 use libm::{asin, atan2, floor, sqrt};
 
 use crate::{
     astro::MoonPhaseAngle,
-    ephem::{CelestialBody, EphemerisQuery, KernelManifest, RelativeState},
+    ephem::{CelestialBody, EphemerisProvenance, EphemerisProvider, EphemerisQuery, RelativeState},
     frame::{Bcrs, EclipticLatitude, EclipticLongitude},
     math::{Angle, Length, Speed},
     time::{Duration, Instant, JulianDate, JulianEpoch, TimeContext, TimeInterval, TimeScale, Tt},
@@ -342,14 +342,14 @@ impl<S: TimeScale> fmt::Debug for CycleBoundary<S> {
 pub struct CycleModel {
     criterion: &'static str,
     reference_axes: &'static str,
-    ephemeris: Arc<KernelManifest>,
+    ephemeris: EphemerisProvenance,
 }
 
 impl CycleModel {
     fn new(
         criterion: &'static str,
         reference_axes: &'static str,
-        ephemeris: Arc<KernelManifest>,
+        ephemeris: EphemerisProvenance,
     ) -> Self {
         Self {
             criterion,
@@ -368,8 +368,8 @@ impl CycleModel {
         self.reference_axes
     }
 
-    /// Returns the exact ordered local kernel manifest used by the measurement.
-    pub fn ephemeris(&self) -> &KernelManifest {
+    /// Returns the exact model and data provenance used by the measurement.
+    pub const fn provenance(&self) -> &EphemerisProvenance {
         &self.ephemeris
     }
 }
@@ -714,7 +714,7 @@ enum ScalarResidualKind {
     RadialSpeed,
 }
 
-impl<'context, 'data, E> Events<'context, 'data, E> {
+impl<'context, 'data, E, P: EphemerisProvider + ?Sized> Events<'context, 'data, E, P> {
     /// Measures complete intervals between adjacent occurrences of one selected equinox.
     pub fn equinox_years_in<S: TimeScale>(
         &self,
@@ -908,7 +908,10 @@ impl<'context, 'data, E> Events<'context, 'data, E> {
         let model = CycleModel::new(
             criterion,
             reference_axes,
-            Arc::new(self.astrometry.ephemeris().manifest().clone()),
+            self.astrometry
+                .ephemeris()
+                .provenance()
+                .map_err(crate::astro::Error::from)?,
         );
         let mut cycles = Vec::with_capacity(boundaries.len().saturating_sub(1));
         for pair in boundaries.windows(2) {

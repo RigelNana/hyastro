@@ -67,7 +67,7 @@ impl<S: TimeScale> JulianDate<S> {
         (self.first, self.second)
     }
 
-    #[cfg(feature = "anise")]
+    #[cfg(feature = "std")]
     pub(crate) fn nominal_fraction_since_midnight(self) -> f64 {
         let (sum, error) = Self::two_sum(self.first + 0.5, self.second);
         let mut fraction = (sum - floor(sum)) + error;

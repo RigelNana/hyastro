@@ -20,6 +20,7 @@ mod interval;
 mod jiff;
 mod julian;
 mod leap;
+mod prediction;
 mod scale;
 #[cfg(feature = "std")]
 mod tdb;
@@ -33,7 +34,8 @@ pub use context::{NoEarthOrientation, TimeContext, TimeScaleModel};
 pub use delta_t::DeltaT;
 pub use duration::Duration;
 pub use earth_attitude::{
-    EarthAttitude, EarthAttitudeSample, EarthAttitudeStandardUncertainties, EarthAttitudeTable,
+    EarthAttitude, EarthAttitudeModel, EarthAttitudeSample, EarthAttitudeStandardUncertainties,
+    EarthAttitudeState, EarthAttitudeTable,
 };
 pub use earth_rotation::{EarthRotation, EarthRotationSample, EarthRotationTable};
 pub use eop::{
@@ -55,6 +57,10 @@ pub use interval::TimeInterval;
 pub use jiff::Jiff;
 pub use julian::{BesselianEpoch, JulianDate, JulianEpoch, ModifiedJulianDate};
 pub use leap::{LeapKind, LeapSecond, LeapSeconds};
+pub use prediction::{
+    DeltaTEstimate, DeltaTModel, EarthAttitudeModelProvenance, EarthAttitudeOffsetModel,
+    EarthAttitudeOffsetUncertainties, PredictedEarthOrientation, PredictionDisposition,
+};
 pub use scale::{Gps, Posix, Tai, Tcb, Tcg, Tdb, TimeScale, Tt, Ut1, Utc};
 #[cfg(feature = "std")]
 pub use tdb::{GeocentricTdb, TdbSolution};

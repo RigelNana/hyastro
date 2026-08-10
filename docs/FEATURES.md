@@ -259,7 +259,7 @@
 - **F-EOP-013 P1 适配** 古代和未来 Delta T 经验模型。
 - **F-EOP-015 P1 数据** EOP 表合并、优先级和重复日期检查。
 
-当前 `EarthRotationTable` 和完整 `EarthOrientationTable` 都通过 `TimeContext::delta_t_at` 提供 F-EOP-012。计算使用同一物理历元的插值 `UT1−UTC`、闰秒表 `TAI−UTC` 与精确 `TT−TAI = 32.184 s`；返回 `DeltaT<S>` 并在 UTC 闰秒处保持 `TT−UT1` 连续。F-EOP-013 的古代/未来经验外推尚未实现，也不会在 EOP 覆盖外静默启用。
+当前 `EarthRotationTable` 和完整 `EarthOrientationTable` 都通过 `TimeContext::delta_t_at` 从同一物理历元的 `UT1−UTC`、适用的 `TAI−UTC` 与精确定义 `TT−TAI = 32.184 s` 组合 F-EOP-012，并在 UTC 闰秒处保持 `TT−UT1` 连续。未来或历史场景可改用 `DeltaTModel`：显式闭区间常量适合复现已发布预测，内置 NASA/Espenak–Meeus 2006 分段多项式覆盖 −1999—3000 年，调用者函数接缝可承载其他版本化模型；每次求值返回可选标准不确定度，不伪造模型误差。`PredictedEarthOrientation` 把该模型与具名极移/天极偏差预测或零假设组合，直接从 TT 推导 UT1，不要求也不制造未来 `UTC`、闰秒或 `UT1−UTC`。
 
 ### 7.4 GPS、Unix 与其他系统时间
 
@@ -500,7 +500,7 @@
 - **F-OBSPLACE-011 P1 内核** field rotation 和变化率。
 - **F-OBSPLACE-012 P1 内核** 大气质量。
 
-当前 `ObservedPlace<S>` 路径实现 F-OBSPLACE-008：调用者必须显式提供 `AtmosphericConditions`，生产计算使用 `sofars 0.6.1` 的 SOFA `refco` 系数与 `atioq` CIRS→观测坐标链，并返回模型适用范围分类；结果保留来源真空阶段、双历元、距离和光行时诊断。F-OBSPLACE-009—012 仍未落地。
+当前 `ObservedPlace<S>` 路径实现 F-OBSPLACE-008：调用者必须显式提供 `AtmosphericConditions`，生产计算使用 `sofars 0.6.1` 的 SOFA `refco` 系数与 `atioq` CIRS→观测坐标链，并返回模型适用范围分类；结果保留来源真空阶段、双历元、距离和光行时诊断。`VacuumObservedPlace`、`ObservedPlace` 及星表对应阶段现可返回历元绑定的 `ParallacticAngleAt<S>`，采用 SOFA `iauHd2pa` 的有符号约定。`Astrometry::field_rotation_at` 在请求历元前后各完成一次独立的站点/EOP/目标光行时链，用对称差分返回 `FieldRotation<S>` 的中心视差角、有符号变化量、角速度、方向和采样证据；完整 `EarthOrientationTable` 路径使用观测 LOD，任意 `EarthAttitudeModel` 的降级接口明确命名为名义地球自转率。当前覆盖 F-OBSPLACE-010/011；反算和气团质量 F-OBSPLACE-009/012 仍未落地。
 
 ### 11.4 Barycentric 校正
 
@@ -607,6 +607,8 @@
 - **F-EPH-014 P1 内核** 批量时刻和批量目标查询。
 - **F-EPH-015 P1 内核** 调用者拥有的确定性缓存。
 
+当前 `EphemerisProvider` 已把单后端接缝收敛为三项能力：`state(EphemerisQuery<Bcrs, S>)`、连续 `coverage` 和可保留的 `EphemerisProvenance`。`Astrometry`、`FixedObserverAt` 与 `Events` 通过提供者类型参数静态分派，不再依赖 ANISE 具体类型；外部测试后端可只使用 hyastro 的查询、状态、覆盖和错误类型实现同一接缝。当前实现覆盖 F-EPH-001 至 F-EPH-004、F-EPH-007 和 F-EPH-012 的单后端路径；F-EPH-008 的统一能力枚举、F-EPH-010 的多后端组合/显式优先级，以及批量和缓存仍未实现。后端缺失或覆盖外不会触发隐式回退。
+
 ### 14.2 DAF/SPK/BSP
 
 - **F-ANISE-001 P0 适配** 采用 ANISE 0.10 系列实现 hyastro 历表和动态参考系接缝。
@@ -653,6 +655,10 @@
 - **F-ANA-001 P1 适配** 明确误差范围的快速太阳/行星模型。
 - **F-ANA-002 P1 数据** 每个解析模型的版本、坐标、时标和有效期。
 
+当前默认 `std` 后端 `SofaAnalyticEphemeris` 将 SOFA `epv00`（SSB/太阳/地球）、`moon98`（地心月球）和 `plan94`（水星、金星、地月、火星、木星、土星、天王星、海王星系统质心）接入同一 `EphemerisProvider`，不分配且不读取文件。日地查询采用 1900–2100 覆盖，月球采用 1950–2100 覆盖；仅由太阳和 PLAN94 系统组成的查询采用 1000–3000 覆盖，与地球、月球或 SSB 组合时取所需模型覆盖的交集。PLAN94 结果只映射到 `*Barycenter`/`EarthMoonBarycenter` 身份，不把系统质心伪装成带物理表面的行星本体。
+
+`Plan94Accuracy` 公开 SOFA 对每个系统发布的误差合同：1800–2100 对 DE200/DE406 的最大黄经、黄纬和半径差，以及 1960–2025 对 DE200 的位置/速度 RMS。使用 DE440s 在 1900、2000、2024、2100 四个代表历元进行的日心系统质心差分中，各系统采样最大位置差依次为：水星 350 km、金星 988 km、地月质心 867 km、火星 9,125 km、木星 116,868 km、土星 289,098 km、天王星 614,028 km、海王星 196,833 km；均小于由 SOFA 已发布角度与半径分量合成的同历元位置界。该实现落地 F-MOON-002、F-ANA-001 和 F-ANA-002；VSOP87、高精度 ELP/MPP02、冥王星解析状态以及行星本体/卫星质心拆分仍未实现。
+
 ### 14.4 SPICE 生态扩展
 
 - **F-SPICE-001 P2 适配** LSK 闰秒内核。
@@ -698,6 +704,8 @@
 - **F-PHYS-013 P2 工作流** 土星环倾角和环面位置角。
 - **F-PHYS-014 P2 工作流** 行星卫星相对位置及互掩互食几何。
 - **F-PHYS-015 P1 工作流** 月球经验视星等模型及适用范围诊断。
+
+当前 `LunarRotationModel::Iau2009Wgccre` 逐项实现 NAIF `pck00011.tpc` 收录的 IAU WGCCRE 2009 月球极轴、本初子午线及 13 项周期项，并以 TDB 为独立变量。`Astrometry::lunar_disk_orientation_at` 复用三段光行时一致的 `LunarIllumination<S>`：平均旋转要素给出光学天平动，含周期项要素给出总天平动，两者的最短有符号差给出物理天平动；结果同时返回地心月面中心东经/纬度、日期真赤道北起向东量的月轴位置角及亮边位置角。模型未伪造有效区间，`applicability()` 明确提示亚角分需求应改用任务级月球姿态内核。上述路径覆盖 F-PHYS-006、F-PHYS-009—011；高精度姿态内核适配和站心周日天平动仍未实现。
 
 当前 `HorizonsCompatibleLunarV` 消耗现有 `LunarIllumination<S>` 的三条收敛光行时和物理相位角，计算地心、无大气、积分月面 Johnson V/Vega 星等。`GeocentricLunarVMagnitude<S>` 保留原始照明几何、距离项、相位项、模型标识及 `LunarVApplicability`；相位角小于 $7^\circ$ 的已知偏暗区和月面与地影相交均不会静默标成正常结果。行星经验模型、大气消光和月食亮度衰减仍未实现，F-PHYS-007 保持待实现。
 
@@ -887,6 +895,13 @@
 - **F-SOL-012 P2 数据** 月缘地形对全食/环食界线和贝利珠的可选修正。
 - **F-SOL-013 P2 工作流** 路径 GeoJSON/采样输出适配。
 
+当前 `event::solar_eclipse` 已实现地方日食垂直切片：`Events::local_solar_eclipses_in` 以地心视朔作候选种子，在固定站点真空视位置上直接最大化食分，并分别求解外切 C1/C4 与全食或环食的内切 C2/C3。工作流既接受完整 `EarthOrientationTable` 观测姿态，也接受显式 `PredictedEarthOrientation` 场景；后者由版本化 `DeltaTModel` 直接给出 `TT−UT1`，并用具名极移/天极偏差预测或假设产生方向姿态，站点速度明确使用 IERS 名义自转率而不伪造 LOD。`LocalSolarEclipse<S>` 保留偏食/环食/全食分类、完整接触、食甚、食分、圆盘重叠遮掩比例、太阳高度/方位、接触位置角、阶段持续时间、球形日月半径模型、完整观测/预测姿态 provenance、历表 provenance 和数值证据；太阳视盘越过天文地平线的可见性可逐事件查询。默认解析历表用于近似和初筛；`tests/local_solar_eclipse_contracts.rs` 同时覆盖 2024 IERS C04 观测路径与 2035 `Delta T` 预测路径，并以 DE440、IERS C04 和 USNO 2024-04-08 Dallas 地方资料验证时刻、位置角、食分和持续时间。
+
+当前 `event::global_solar_eclipse` 的全球阴影锥分类不依赖贝塞尔近似：`Events::global_solar_eclipses_in` 在视朔附近最小化日月阴影轴到地心的距离，以调用者选择的旋转参考椭球和球形日月半径建立精确公切锥。结果保留带南北符号的 `SolarEclipseGamma`、全球食甚时刻、阴影轴距离、半影/本影/伪本影与椭球的数值交会、中心轴掠入/掠出区间、非中心全食/环食分类，以及锥顶穿越近侧地表的全环食转换时刻。独立的 `Events::solar_eclipse_besselian_elements_at` 已实现指定历元的 F-SOL-003—004 根数和 60 秒 TT 对称导数；`BesselianElementsOptions` 要求显式选择 `BesselianLimbModel`，可使用单一物理月球球面，或 NASA Five Millennium Canon 的 696000 km 太阳半径、`k1=0.272488`、`k2=0.272281` 与默认零 `Δb/Δl`。非零 `Δb/Δl` 会实际修正月球日期真黄纬/真黄经后再参与阴影轴计算，不是未应用的元数据。`Events::solar_eclipse_besselian_polynomial` 以五个等间隔视位置样本拟合六小时发布表：`x/y` 三次、`d/l1/l2` 二次、`μ` 一次，保留解析导数、闭有效区间、样本最大残差、模型和历表来源，区间外拒绝外推。`μ` 采用 TT 历书时角，旋转地球应用仍须由调用者另给 `ΔT=TT−UT1`。`tests/besselian_elements_contracts.rs` 以非零 `Δb/Δl` 行为契约及 2024-04-08 NASA 表和 DE440 验证半径常数、全部系数与导数；全球四分类及非中心食由 `tests/global_solar_eclipse_contracts.rs` 覆盖。因此 F-SOL-001—004 已实现，F-SOL-007 的全球食甚时刻部分已实现；其地理地点与 F-SOL-006 的路径能力由下述 `solar_eclipse_path` 工作流实现。
+
+`Events::solar_eclipse_path` 现已实现 F-SOL-006 和 F-SOL-007 的地理部分：它把同一历表、同一参考椭球的 `GlobalSolarEclipse<S>` 与六小时 `BesselianElementsPolynomial<S>` 组合，并要求调用者提供在多项式参考历元解析的强类型 `DeltaT<S>`。每个 `GlobalSolarEclipsePathPoint<S>` 保存中心线、运动核心影包络的北/南界、同一时刻两界的椭球反解测地跨度 `boundary_geodesic_span`、按贝塞尔路径公式投影到垂直于中心线运动方向的横向 `path_width`、固定中心线站点的 C2/C3 与中心阶段持续时间、环食/全食性质，以及无折射太阳高度和方位；路径默认以两分钟采样，另保留阴影轴掠入/掠出的完整时间区间。北/南界由“核心影锥落在地表”与“固定地表点接触残差对时间的一阶导数为零”联立得到，是运动阴影的路径包络，不是瞬时影斑的纬度极值。日出/日落附近可能只有一条包络分支，这些单边时刻保留在路径时间区间中，但不伪造完整双边截面。`tests/solar_eclipse_path_contracts.rs` 以解析历表验证结构不变量，并以 DE440、IERS C04、NASA 路径表验证食甚地点、边界测地跨度、横向路径宽度、中心持续时间和太阳高度/方位。F-SOL-013 的强类型采样部分已实现，GeoJSON 输出适配仍未实现；月缘地形修正、全局 P/U 接触语义及地方日出/日落带食分类仍分别属于 F-SOL-012、F-SOL-005 和 F-SOL-010 的未完成部分。
+
+
 ### 20.3 月食
 
 - **F-LUN-001 P2 工作流** 半影、偏食和全食分类。
@@ -896,6 +911,10 @@
 - **F-LUN-005 P2 工作流** 月面接触位置角。
 - **F-LUN-006 P2 数据** 地球本影/半影扩大模型和大气经验参数。
 - **F-LUN-007 P2 工作流** 地方可见性、月球高度和晨昏背景。
+
+当前 `event::lunar_eclipse` 已实现 F-LUN-001—007。`Events::global_lunar_eclipses_in` 以地心视满月作种子，在日期真赤道轴上最小化月心到反日地影轴的角距；`LunarShadowGeometry<S>` 由同一接收历元的日月视位置、调用者的 `Earth` 赤道半径和 IAU 球形日月模型计算半影/本影角半径、月面轴距、半影/本影食分与接触位置角。`LunarShadowConvention` 显式区分无大气几何、NASA Five Millennium Catalog 使用的 Danjon `1.01` 有效地球视差约定，以及 Chauvenet `0.998340` 视差后统一 `1.02` 阴影扩大约定，不把经验边界伪装成唯一物理边界。结果按半影/偏食/全食分类，保留 P1、U1、U2、食甚、U3、U4、P4、嵌套阶段区间与持续时间、数值括根/极值证据、模型和历表 provenance。
+
+`Events::local_lunar_eclipse_visibility` 只在完整 `EarthOrientationTable` 上公开：它以同一固定站点和选定的中心/上下缘、真空/折射地平判据求解 P1—P4 内月出月落，把全球半影、偏食和全食区间分别与地平线上区间求交，并在每个接触和食甚保留月球站心位置、月球高度、低空标志、太阳真空高度及白昼/民用曙暮光/航海曙暮光/天文曙暮光/夜间背景。`tests/lunar_eclipse_contracts.rs` 覆盖三种分类、Dallas 月落截断和低空提示，并以 DE440 对照 NASA 2022-11-08 的接触时刻、食分和位置角；`examples/analytic_lunar_eclipses.rs` 提供解析历表和可选 BSP 的全年全球—地方工作流。月食实际亮度衰减、云量和地形地平线不属于 F-LUN-001—007，仍分别由光度、天气输入和地形模型承担。
 
 ### 20.4 掩星和凌日
 

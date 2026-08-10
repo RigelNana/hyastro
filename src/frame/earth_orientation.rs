@@ -11,7 +11,7 @@ use crate::{
         Speed, Vector3,
     },
     time::{
-        Duration, EarthAttitude, EarthAttitudeTable, EarthOrientation, EarthOrientationTable,
+        Duration, EarthAttitudeModel, EarthAttitudeState, EarthOrientation, EarthOrientationTable,
         Instant, JulianDate, TimeContext, TimeScale, TimeScaleModel, Tt, Ut1,
     },
 };
@@ -435,42 +435,45 @@ impl EarthAttitudeRotations {
     }
 }
 
-/// A coherent observed Earth-attitude solution at one physical epoch.
+/// A coherent Earth-attitude solution at one physical epoch.
 ///
-/// The solution includes `UT1−UTC`, polar motion, and celestial-pole
-/// corrections. It supplies direction rotations but deliberately makes no
-/// claim about length of day or measured frame angular velocity.
+/// The solution includes Delta T, optional tabulated `UT1−UTC`, polar motion,
+/// and celestial-pole corrections. It supplies direction rotations but makes
+/// no claim about measured frame angular velocity.
 #[derive(Debug, Clone, Copy)]
 pub struct EarthAttitudeSolution<S: TimeScale> {
     epoch: Instant<S>,
     terrestrial_time: JulianDate<Tt>,
     universal_time: JulianDate<Ut1>,
-    observations: EarthAttitude<S>,
+    attitude: EarthAttitudeState<S>,
     rotations: EarthAttitudeRotations,
 }
 
 impl<S: TimeScale> EarthAttitudeSolution<S> {
-    pub(super) fn at(
+    pub(super) fn at<E: EarthAttitudeModel>(
         epoch: Instant<S>,
-        time: &TimeContext<'_, EarthAttitudeTable<'_>>,
+        time: &TimeContext<'_, E>,
     ) -> Result<Self, Error> {
-        let observations = time.earth_attitude_at(epoch)?;
+        let attitude = time.earth_attitude_state_at(epoch)?;
         let terrestrial_time = JulianDate::<Tt>::from_instant(epoch, time)?;
-        let universal_time = JulianDate::<Ut1>::from_instant(epoch, time)?;
+        let ut1_coordinate = terrestrial_time
+            .checked_add_duration(attitude.delta_t().tt_minus_ut1().checked_neg()?)?;
+        let (ut1_first, ut1_second) = ut1_coordinate.parts();
+        let universal_time = JulianDate::<Ut1>::from_parts(ut1_first, ut1_second)?;
         let rotations = EarthAttitudeRotations::at(
             epoch,
             terrestrial_time,
             universal_time,
-            observations.polar_motion_x().as_angle(),
-            observations.polar_motion_y().as_angle(),
-            observations.celestial_pole_offset_x().as_angle(),
-            observations.celestial_pole_offset_y().as_angle(),
+            attitude.polar_motion_x().as_angle(),
+            attitude.polar_motion_y().as_angle(),
+            attitude.celestial_pole_offset_x().as_angle(),
+            attitude.celestial_pole_offset_y().as_angle(),
         )?;
         Ok(Self {
             epoch,
             terrestrial_time,
             universal_time,
-            observations,
+            attitude,
             rotations,
         })
     }
@@ -490,9 +493,9 @@ impl<S: TimeScale> EarthAttitudeSolution<S> {
         self.universal_time
     }
 
-    /// Returns the interpolated Earth-attitude observation.
-    pub const fn observations(self) -> EarthAttitude<S> {
-        self.observations
+    /// Returns the resolved tabulated or predicted Earth-attitude state.
+    pub const fn earth_attitude(self) -> EarthAttitudeState<S> {
+        self.attitude
     }
 
     /// Returns the IAU 2000 TIO locator $s'$.
@@ -510,12 +513,12 @@ impl<S: TimeScale> EarthAttitudeSolution<S> {
         self.rotations.precession_nutation
     }
 
-    /// Returns the CIP coordinates after applying observed `dX,dY`.
+    /// Returns the CIP coordinates after applying the selected `dX,dY`.
     pub const fn cip(self) -> CelestialIntermediatePole {
         self.rotations.cip
     }
 
-    /// Returns the observed GCRS-to-CIRS rotation.
+    /// Returns the selected GCRS-to-CIRS rotation.
     pub const fn gcrs_to_cirs(self) -> FrameRotation<Gcrs, Cirs, S> {
         FrameRotation::new(self.epoch, self.rotations.gcrs_to_cirs)
     }
@@ -525,17 +528,17 @@ impl<S: TimeScale> EarthAttitudeSolution<S> {
         FrameRotation::new(self.epoch, self.rotations.cirs_to_tirs)
     }
 
-    /// Returns the observed TIRS-to-ITRS polar-motion rotation.
+    /// Returns the selected TIRS-to-ITRS polar-motion rotation.
     pub const fn tirs_to_itrs(self) -> FrameRotation<Tirs, Itrs, S> {
         FrameRotation::new(self.epoch, self.rotations.tirs_to_itrs)
     }
 
-    /// Returns the complete observed GCRS-to-ITRS direction rotation.
+    /// Returns the complete selected GCRS-to-ITRS direction rotation.
     pub const fn gcrs_to_itrs(self) -> FrameRotation<Gcrs, Itrs, S> {
         FrameRotation::new(self.epoch, self.rotations.gcrs_to_itrs)
     }
 
-    /// Converts a GCRS direction to observed CIRS intermediate coordinates.
+    /// Converts a GCRS direction to selected CIRS intermediate coordinates.
     pub fn intermediate_equatorial(
         self,
         source: EquatorialDirection<Gcrs>,

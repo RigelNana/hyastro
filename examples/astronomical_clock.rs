@@ -1051,7 +1051,7 @@ const fn lunar_v_applicability_label(applicability: LunarVApplicability) -> &'st
 }
 
 fn calculate_body(
-    observer: FixedObserverAt<'_, Utc>,
+    observer: FixedObserverAt<'_, Utc, Ephemeris>,
     atmosphere: AtmosphericConditions,
     options: ReceptionLightTimeOptions,
     local_apparent_sidereal_hours: f64,

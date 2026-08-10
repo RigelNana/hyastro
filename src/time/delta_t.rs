@@ -1,4 +1,6 @@
-use super::{Duration, Instant, TimeScale};
+use crate::constants::time::TT_MINUS_TAI_NANOSECONDS;
+
+use super::{Duration, Error, Instant, LeapSeconds, Tai, TimeScale, Ut1MinusUtc};
 
 /// The resolved difference `TT−UT1` at one physical epoch.
 ///
@@ -17,6 +19,17 @@ impl<S: TimeScale> DeltaT<S> {
             epoch,
             tt_minus_ut1,
         }
+    }
+    pub(crate) fn from_ut1_minus_utc(
+        epoch: Instant<S>,
+        ut1_minus_utc: Ut1MinusUtc,
+        leap_seconds: LeapSeconds<'_>,
+    ) -> Result<Self, Error> {
+        let tai_minus_utc = leap_seconds.offset(epoch.retag::<Tai>())?;
+        let tt_minus_ut1 = Duration::from_nanoseconds(TT_MINUS_TAI_NANOSECONDS)
+            .checked_add(tai_minus_utc)?
+            .checked_sub(ut1_minus_utc.as_duration())?;
+        Ok(Self::new(epoch, tt_minus_ut1))
     }
 
     /// Returns the physical epoch at which Delta T was resolved.

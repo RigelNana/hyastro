@@ -1,6 +1,7 @@
 use core::{fmt, marker::PhantomData};
 
 use crate::{
+    frame::Bcrs,
     math::{Length, Speed, Vector3},
     time::{Instant, TimeScale},
 };
@@ -67,6 +68,71 @@ impl<F, S: TimeScale> fmt::Debug for EphemerisQuery<F, S> {
             .field("epoch", &self.epoch)
             .finish()
     }
+}
+
+/// Immutable identification of the model and data behind an ephemeris result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EphemerisProvenance {
+    model: &'static str,
+    #[cfg(feature = "anise")]
+    kernel_manifest: Option<super::KernelManifest>,
+}
+
+impl EphemerisProvenance {
+    /// Constructs provenance from a non-empty stable model or adapter identifier.
+    pub fn try_from_model(model: &'static str) -> Result<Self, Error> {
+        if model.is_empty() {
+            return Err(Error::EmptyModelIdentifier);
+        }
+        Ok(Self {
+            model,
+            #[cfg(feature = "anise")]
+            kernel_manifest: None,
+        })
+    }
+
+    #[cfg(feature = "anise")]
+    pub(crate) fn anise(model: &'static str, kernel_manifest: super::KernelManifest) -> Self {
+        Self {
+            model,
+            kernel_manifest: Some(kernel_manifest),
+        }
+    }
+
+    /// Returns the stable model or adapter identifier.
+    pub const fn model(&self) -> &'static str {
+        self.model
+    }
+
+    /// Returns the exact ordered ANISE kernel manifest, when applicable.
+    #[cfg(feature = "anise")]
+    pub const fn kernel_manifest(&self) -> Option<&super::KernelManifest> {
+        self.kernel_manifest.as_ref()
+    }
+}
+
+/// Geometric BCRS state and coverage provider used by astrometric workflows.
+///
+/// Implementations must return uncorrected target-minus-centre Cartesian
+/// states at the query's physical epoch. Light time, aberration, deflection,
+/// Earth orientation, and atmospheric refraction belong to higher layers.
+/// The generic time-scale tag is retained on returned values; it does not
+/// change the physical instant at which the provider evaluates its model.
+pub trait EphemerisProvider {
+    /// Evaluates one geometric BCRS target-minus-centre state.
+    fn state<S: TimeScale>(
+        &self,
+        query: EphemerisQuery<Bcrs, S>,
+    ) -> Result<RelativeState<Bcrs, S>, Error>;
+
+    /// Returns the inclusive continuous coverage for one query.
+    fn coverage<S: TimeScale>(
+        &self,
+        query: EphemerisQuery<Bcrs, S>,
+    ) -> Result<Coverage<Bcrs, S>, Error>;
+
+    /// Captures immutable model and data provenance for retained results.
+    fn provenance(&self) -> Result<EphemerisProvenance, Error>;
 }
 
 /// A target-centre Cartesian state whose vector axes are encoded by frame `F`.
@@ -239,7 +305,22 @@ pub struct Coverage<F, S: TimeScale> {
 }
 
 impl<F, S: TimeScale> Coverage<F, S> {
-    #[cfg(feature = "anise")]
+    /// Constructs an inclusive continuous coverage interval.
+    pub fn try_new(
+        target: CelestialBody,
+        center: CelestialBody,
+        start: Instant<S>,
+        end: Instant<S>,
+    ) -> Result<Self, Error> {
+        if end < start {
+            return Err(Error::InvalidCoverageInterval {
+                start_tai_nanoseconds: start.tai_nanoseconds_since_1900(),
+                end_tai_nanoseconds: end.tai_nanoseconds_since_1900(),
+            });
+        }
+        Ok(Self::from_ordered(target, center, start, end))
+    }
+
     pub(crate) const fn from_ordered(
         target: CelestialBody,
         center: CelestialBody,

@@ -1,7 +1,7 @@
 use crate::{
     astro::{Astrometry, ReceptionLightTimeOptions},
     earth::FixedSite,
-    ephem::{CelestialBody, EphemerisQuery},
+    ephem::{CelestialBody, EphemerisProvider, EphemerisQuery},
     frame::{
         Bcrs, EclipticDirectionAt, EquatorialDirection, EquatorialDirectionAt, Frames, Gcrs,
         TrueEclipticEquinoxOfDate, TrueEquatorEquinoxOfDate,
@@ -221,15 +221,17 @@ pub(super) trait RelativeSampler<S: TimeScale> {
     }
 }
 
-pub(super) struct GeocentricRelativeSampler<'context, 'data, E> {
-    astrometry: Astrometry<'context, 'data, E>,
+pub(super) struct GeocentricRelativeSampler<'context, 'data, E, P: EphemerisProvider + ?Sized> {
+    astrometry: Astrometry<'context, 'data, E, P>,
     mode: AstrometricMode,
     light_time: ReceptionLightTimeOptions,
 }
 
-impl<'context, 'data, E> GeocentricRelativeSampler<'context, 'data, E> {
+impl<'context, 'data, E, P: EphemerisProvider + ?Sized>
+    GeocentricRelativeSampler<'context, 'data, E, P>
+{
     pub(super) const fn new(
-        astrometry: Astrometry<'context, 'data, E>,
+        astrometry: Astrometry<'context, 'data, E, P>,
         mode: AstrometricMode,
         light_time: ReceptionLightTimeOptions,
     ) -> Self {
@@ -303,7 +305,9 @@ impl<'context, 'data, E> GeocentricRelativeSampler<'context, 'data, E> {
     }
 }
 
-impl<S: TimeScale, E> RelativeSampler<S> for GeocentricRelativeSampler<'_, '_, E> {
+impl<S: TimeScale, E, P: EphemerisProvider + ?Sized> RelativeSampler<S>
+    for GeocentricRelativeSampler<'_, '_, E, P>
+{
     fn origin(&self) -> ObservationOrigin {
         ObservationOrigin::Geocenter
     }
@@ -323,16 +327,24 @@ impl<S: TimeScale, E> RelativeSampler<S> for GeocentricRelativeSampler<'_, '_, E
     }
 }
 
-pub(super) struct FixedSiteRelativeSampler<'context, 'data, 'site, 'eop> {
-    astrometry: Astrometry<'context, 'data, EarthOrientationTable<'eop>>,
+pub(super) struct FixedSiteRelativeSampler<
+    'context,
+    'data,
+    'site,
+    'eop,
+    P: EphemerisProvider + ?Sized,
+> {
+    astrometry: Astrometry<'context, 'data, EarthOrientationTable<'eop>, P>,
     site: &'site FixedSite,
     mode: AstrometricMode,
     light_time: ReceptionLightTimeOptions,
 }
 
-impl<'context, 'data, 'site, 'eop> FixedSiteRelativeSampler<'context, 'data, 'site, 'eop> {
+impl<'context, 'data, 'site, 'eop, P: EphemerisProvider + ?Sized>
+    FixedSiteRelativeSampler<'context, 'data, 'site, 'eop, P>
+{
     pub(super) const fn new(
-        astrometry: Astrometry<'context, 'data, EarthOrientationTable<'eop>>,
+        astrometry: Astrometry<'context, 'data, EarthOrientationTable<'eop>, P>,
         site: &'site FixedSite,
         mode: AstrometricMode,
         light_time: ReceptionLightTimeOptions,
@@ -421,7 +433,9 @@ impl<'context, 'data, 'site, 'eop> FixedSiteRelativeSampler<'context, 'data, 'si
     }
 }
 
-impl<S: TimeScale> RelativeSampler<S> for FixedSiteRelativeSampler<'_, '_, '_, '_> {
+impl<S: TimeScale, P: EphemerisProvider + ?Sized> RelativeSampler<S>
+    for FixedSiteRelativeSampler<'_, '_, '_, '_, P>
+{
     fn origin(&self) -> ObservationOrigin {
         ObservationOrigin::FixedSite
     }

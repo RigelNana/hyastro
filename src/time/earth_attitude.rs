@@ -3,8 +3,9 @@ use crate::uncertainty::{StandardUncertainty, UncertaintyOrigin};
 use crate::math::Angle;
 
 use super::{
-    CelestialPoleOffsetX, CelestialPoleOffsetY, Duration, Error, Instant, LeapSeconds,
-    PolarMotionX, PolarMotionY, Tai, TimeScale, Ut1MinusUtc, Utc,
+    CelestialPoleOffsetX, CelestialPoleOffsetY, DeltaT, Duration, EarthAttitudeModelProvenance,
+    EarthOrientationTable, Error, Instant, JulianDate, LeapSeconds, PolarMotionX, PolarMotionY,
+    PredictedEarthOrientation, Tai, TimeScale, Tt, Ut1MinusUtc, Utc,
 };
 
 /// Source standard uncertainties associated with Earth-attitude values.
@@ -511,5 +512,205 @@ impl<S: TimeScale> EarthAttitude<S> {
     /// Returns how the available standard uncertainties were obtained.
     pub const fn standard_uncertainty_origin(self) -> Option<UncertaintyOrigin> {
         self.standard_uncertainty_origin
+    }
+}
+
+/// Earth-attitude quantities resolved from either tabulated data or an explicit model.
+///
+/// Delta T is always available and is sufficient to derive UT1 from TT. `UT1−UTC`
+/// is present only when the source is a UTC-tagged table with a valid leap-second
+/// mapping at the requested instant.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EarthAttitudeState<S: TimeScale> {
+    epoch: Instant<S>,
+    delta_t: DeltaT<S>,
+    delta_t_standard_uncertainty: Option<StandardUncertainty<Duration>>,
+    ut1_minus_utc: Option<Ut1MinusUtc>,
+    polar_motion_x: PolarMotionX,
+    polar_motion_y: PolarMotionY,
+    celestial_pole_offset_x: CelestialPoleOffsetX,
+    celestial_pole_offset_y: CelestialPoleOffsetY,
+    standard_uncertainties: EarthAttitudeStandardUncertainties,
+}
+
+impl<S: TimeScale> EarthAttitudeState<S> {
+    fn from_attitude(
+        attitude: EarthAttitude<S>,
+        leap_seconds: LeapSeconds<'_>,
+    ) -> Result<Self, Error> {
+        Ok(Self {
+            epoch: attitude.epoch(),
+            delta_t: DeltaT::from_ut1_minus_utc(
+                attitude.epoch(),
+                attitude.ut1_minus_utc(),
+                leap_seconds,
+            )?,
+            delta_t_standard_uncertainty: attitude.standard_uncertainties().ut1_minus_utc(),
+            ut1_minus_utc: Some(attitude.ut1_minus_utc()),
+            polar_motion_x: attitude.polar_motion_x(),
+            polar_motion_y: attitude.polar_motion_y(),
+            celestial_pole_offset_x: attitude.celestial_pole_offset_x(),
+            celestial_pole_offset_y: attitude.celestial_pole_offset_y(),
+            standard_uncertainties: attitude.standard_uncertainties(),
+        })
+    }
+
+    fn from_orientation(
+        orientation: super::EarthOrientation<S>,
+        leap_seconds: LeapSeconds<'_>,
+    ) -> Result<Self, Error> {
+        Ok(Self {
+            epoch: orientation.epoch(),
+            delta_t: DeltaT::from_ut1_minus_utc(
+                orientation.epoch(),
+                orientation.ut1_minus_utc(),
+                leap_seconds,
+            )?,
+            delta_t_standard_uncertainty: None,
+            ut1_minus_utc: Some(orientation.ut1_minus_utc()),
+            polar_motion_x: orientation.polar_motion_x(),
+            polar_motion_y: orientation.polar_motion_y(),
+            celestial_pole_offset_x: orientation.celestial_pole_offset_x(),
+            celestial_pole_offset_y: orientation.celestial_pole_offset_y(),
+            standard_uncertainties: EarthAttitudeStandardUncertainties::new(
+                None, None, None, None, None,
+            ),
+        })
+    }
+
+    fn from_prediction(
+        prediction: PredictedEarthOrientation<'_>,
+        epoch: Instant<S>,
+        terrestrial_time: JulianDate<Tt>,
+    ) -> Result<Self, Error> {
+        let (delta_t, delta_t_standard_uncertainty) =
+            prediction.delta_t_at(epoch, terrestrial_time)?;
+        let offsets = prediction.offset_model();
+        Ok(Self {
+            epoch,
+            delta_t,
+            delta_t_standard_uncertainty,
+            ut1_minus_utc: None,
+            polar_motion_x: offsets.polar_motion_x(),
+            polar_motion_y: offsets.polar_motion_y(),
+            celestial_pole_offset_x: offsets.celestial_pole_offset_x(),
+            celestial_pole_offset_y: offsets.celestial_pole_offset_y(),
+            standard_uncertainties: prediction.standard_uncertainties(),
+        })
+    }
+
+    /// Returns the physical epoch shared by every quantity.
+    pub const fn epoch(self) -> Instant<S> {
+        self.epoch
+    }
+
+    /// Returns `TT−UT1` at the resolved epoch.
+    pub const fn delta_t(self) -> DeltaT<S> {
+        self.delta_t
+    }
+
+    /// Returns the model-supplied Delta T standard uncertainty, when available.
+    pub const fn delta_t_standard_uncertainty(self) -> Option<StandardUncertainty<Duration>> {
+        self.delta_t_standard_uncertainty
+    }
+
+    /// Returns `UT1−UTC` only for a UTC-tagged tabulated source.
+    pub const fn ut1_minus_utc(self) -> Option<Ut1MinusUtc> {
+        self.ut1_minus_utc
+    }
+
+    /// Returns polar motion $x_p$.
+    pub const fn polar_motion_x(self) -> PolarMotionX {
+        self.polar_motion_x
+    }
+
+    /// Returns polar motion $y_p$.
+    pub const fn polar_motion_y(self) -> PolarMotionY {
+        self.polar_motion_y
+    }
+
+    /// Returns celestial-pole correction $dX$.
+    pub const fn celestial_pole_offset_x(self) -> CelestialPoleOffsetX {
+        self.celestial_pole_offset_x
+    }
+
+    /// Returns celestial-pole correction $dY$.
+    pub const fn celestial_pole_offset_y(self) -> CelestialPoleOffsetY {
+        self.celestial_pole_offset_y
+    }
+
+    /// Returns the source-supplied angular and tabulated-UT1 uncertainties.
+    pub const fn standard_uncertainties(self) -> EarthAttitudeStandardUncertainties {
+        self.standard_uncertainties
+    }
+}
+
+pub(crate) mod model {
+    use super::*;
+
+    pub trait Sealed {
+        fn earth_attitude_state_at<S: TimeScale>(
+            self,
+            epoch: Instant<S>,
+            terrestrial_time: JulianDate<Tt>,
+            leap_seconds: LeapSeconds<'_>,
+        ) -> Result<EarthAttitudeState<S>, Error>;
+
+        fn earth_attitude_provenance(&self) -> EarthAttitudeModelProvenance<'_>;
+    }
+}
+
+/// A sealed source of complete direction-level Earth-attitude quantities.
+///
+/// Built-in implementations cover tabulated full EOP, tabulated attitude
+/// without length of day, and explicit [`PredictedEarthOrientation`] scenarios.
+/// This capability can drive UT1 and terrestrial direction rotations but does
+/// not by itself promise measured angular rates for state transforms.
+pub trait EarthAttitudeModel: model::Sealed + Copy {}
+
+impl<T: model::Sealed + Copy> EarthAttitudeModel for T {}
+
+impl model::Sealed for EarthAttitudeTable<'_> {
+    fn earth_attitude_state_at<S: TimeScale>(
+        self,
+        epoch: Instant<S>,
+        _terrestrial_time: JulianDate<Tt>,
+        leap_seconds: LeapSeconds<'_>,
+    ) -> Result<EarthAttitudeState<S>, Error> {
+        EarthAttitudeState::from_attitude(self.at(epoch, leap_seconds)?, leap_seconds)
+    }
+
+    fn earth_attitude_provenance(&self) -> EarthAttitudeModelProvenance<'_> {
+        EarthAttitudeModelProvenance::tabulated(self.version)
+    }
+}
+
+impl model::Sealed for EarthOrientationTable<'_> {
+    fn earth_attitude_state_at<S: TimeScale>(
+        self,
+        epoch: Instant<S>,
+        _terrestrial_time: JulianDate<Tt>,
+        leap_seconds: LeapSeconds<'_>,
+    ) -> Result<EarthAttitudeState<S>, Error> {
+        EarthAttitudeState::from_orientation(self.at(epoch, leap_seconds)?, leap_seconds)
+    }
+
+    fn earth_attitude_provenance(&self) -> EarthAttitudeModelProvenance<'_> {
+        EarthAttitudeModelProvenance::tabulated(self.version())
+    }
+}
+
+impl model::Sealed for PredictedEarthOrientation<'_> {
+    fn earth_attitude_state_at<S: TimeScale>(
+        self,
+        epoch: Instant<S>,
+        terrestrial_time: JulianDate<Tt>,
+        _leap_seconds: LeapSeconds<'_>,
+    ) -> Result<EarthAttitudeState<S>, Error> {
+        EarthAttitudeState::from_prediction(self, epoch, terrestrial_time)
+    }
+
+    fn earth_attitude_provenance(&self) -> EarthAttitudeModelProvenance<'_> {
+        self.provenance()
     }
 }

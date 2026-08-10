@@ -14,7 +14,10 @@ use crate::{
     time::{Hifitime, Tdb, TimeScale},
 };
 
-use super::{CelestialBody, Coverage, EphemerisQuery, Error, RelativeState};
+use super::{
+    CelestialBody, Coverage, EphemerisProvenance, EphemerisProvider, EphemerisQuery, Error,
+    RelativeState,
+};
 
 const J2000_ORIENTATION_ID: i32 = 1;
 const MAX_CENTER_CHAIN_DEPTH: usize = 8;
@@ -385,5 +388,28 @@ impl fmt::Debug for Ephemeris {
             .debug_struct("Ephemeris")
             .field("manifest", &self.manifest)
             .finish_non_exhaustive()
+    }
+}
+
+impl EphemerisProvider for Ephemeris {
+    fn state<S: TimeScale>(
+        &self,
+        query: EphemerisQuery<Bcrs, S>,
+    ) -> Result<RelativeState<Bcrs, S>, Error> {
+        Ephemeris::state(self, query)
+    }
+
+    fn coverage<S: TimeScale>(
+        &self,
+        query: EphemerisQuery<Bcrs, S>,
+    ) -> Result<Coverage<Bcrs, S>, Error> {
+        Ephemeris::coverage(self, query)
+    }
+
+    fn provenance(&self) -> Result<EphemerisProvenance, Error> {
+        Ok(EphemerisProvenance::anise(
+            "ANISE SPK",
+            self.manifest.clone(),
+        ))
     }
 }

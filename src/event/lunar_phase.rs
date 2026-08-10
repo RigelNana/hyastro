@@ -7,7 +7,7 @@ use std::vec::Vec;
 
 use crate::{
     astro::{GeocentricApparentPlace, MoonPhaseAngle, SolarApparentPlace},
-    ephem::CelestialBody,
+    ephem::{CelestialBody, EphemerisProvider},
     math::Angle,
     time::{
         CivilDateTime, Date, Duration, FixedUtcOffset, Gregorian, Instant, TimeInterval, TimeOfDay,
@@ -282,7 +282,7 @@ struct PhaseEvaluation<S: TimeScale> {
     longitude_difference: f64,
 }
 
-impl<'context, 'data, E> Events<'context, 'data, E> {
+impl<'context, 'data, E, P: EphemerisProvider + ?Sized> Events<'context, 'data, E, P> {
     /// Finds every crossing of one directed apparent lunar phase angle in a closed interval.
     ///
     /// The target is the Moon-minus-Sun apparent geocentric longitude difference on true ecliptic
@@ -554,15 +554,10 @@ impl<'context, 'data, E> Events<'context, 'data, E> {
         evaluations: &mut u32,
     ) -> Result<MoonPhaseAngleEvent<S>, Error> {
         let evaluations_before = *evaluations;
-        // A millisecond-wide root can leave the fast lunar elongation just outside the
-        // standard ten-picoradian residual. A microsecond is still caller-compatible and
-        // avoids the cost of refining every event all the way to nanosecond resolution.
-        let microsecond = Duration::from_nanoseconds(1_000);
-        let refinement_time_tolerance = if options.time_tolerance() < microsecond {
-            options.time_tolerance()
-        } else {
-            microsecond
-        };
+        // Apparent-longitude evaluation can accumulate a few picoradians of floating-point
+        // noise. Refine the fast lunar elongation to the nanosecond grid so the root location
+        // does not consume the standard ten-picoradian residual budget.
+        let refinement_time_tolerance = Duration::from_nanoseconds(1);
         let root = BracketedRootSearch::refine(
             bracket_start,
             bracket_end,

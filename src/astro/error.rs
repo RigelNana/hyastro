@@ -194,6 +194,28 @@ pub enum Error {
         /// Final attempted emission epoch as TAI nanoseconds since 1900-01-01 TAI.
         emission_tai_nanoseconds: i128,
     },
+
+    /// A symmetric field-rotation sample offset was zero or negative.
+    #[error("field-rotation sample offset must be positive, got {nanoseconds} ns")]
+    InvalidFieldRotationSampleOffset {
+        /// Rejected exact offset in nanoseconds.
+        nanoseconds: i128,
+    },
+
+    /// Field-rotation samples were not strictly ordered in physical time.
+    #[error("field-rotation samples must be strictly ordered as previous, current, next")]
+    InvalidFieldRotationSampleOrder,
+
+    /// Field-rotation samples were not equally spaced around the central epoch.
+    #[error(
+        "field-rotation samples must be symmetric: before={before_nanoseconds} ns, after={after_nanoseconds} ns"
+    )]
+    AsymmetricFieldRotationSamples {
+        /// Previous-to-current sample separation.
+        before_nanoseconds: i128,
+        /// Current-to-next sample separation.
+        after_nanoseconds: i128,
+    },
 }
 
 impl Error {

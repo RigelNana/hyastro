@@ -3,6 +3,7 @@ use std::vec::Vec;
 
 use crate::{
     astro::{Astrometry, ReceptionLightTimeOptions},
+    ephem::EphemerisProvider,
     math::{Angle, RootOptions},
     time::{Duration, Instant, TimeScale},
 };
@@ -314,7 +315,7 @@ impl<S: TimeScale> EventEvidence<S> {
         self.time_uncertainty
     }
 
-    /// Returns the final signed apparent-longitude residual.
+    /// Returns the final signed residual of the event's defining angular criterion.
     pub const fn residual(self) -> Angle {
         self.residual
     }
@@ -364,18 +365,18 @@ impl<S: TimeScale> fmt::Debug for EventEvidence<S> {
 }
 
 /// Astronomical event algorithms backed by one immutable astrometry context.
-pub struct Events<'context, 'data, E> {
-    pub(super) astrometry: Astrometry<'context, 'data, E>,
+pub struct Events<'context, 'data, E, P: EphemerisProvider + ?Sized> {
+    pub(super) astrometry: Astrometry<'context, 'data, E, P>,
 }
 
-impl<'context, 'data, E> Events<'context, 'data, E> {
+impl<'context, 'data, E, P: EphemerisProvider + ?Sized> Events<'context, 'data, E, P> {
     /// Constructs event algorithms from an existing astrometry context.
-    pub const fn new(astrometry: Astrometry<'context, 'data, E>) -> Self {
+    pub const fn new(astrometry: Astrometry<'context, 'data, E, P>) -> Self {
         Self { astrometry }
     }
 
     /// Returns the astrometry context used for event evaluations.
-    pub const fn astrometry(self) -> Astrometry<'context, 'data, E> {
+    pub const fn astrometry(&self) -> Astrometry<'context, 'data, E, P> {
         self.astrometry
     }
 }

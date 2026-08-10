@@ -6,7 +6,7 @@ use core::{
 use libm::cos;
 
 use crate::{
-    ephem::{CelestialBody, EphemerisQuery},
+    ephem::{CelestialBody, EphemerisProvider, EphemerisQuery},
     frame::Bcrs,
     math::{Angle, Direction, Error as MathError, PhaseAngle, Separation},
     time::{Instant, TimeScale},
@@ -218,7 +218,7 @@ impl<S: TimeScale> fmt::Debug for LunarIllumination<S> {
     }
 }
 
-impl<'context, 'data, E> Astrometry<'context, 'data, E> {
+impl<'context, 'data, E, P: EphemerisProvider + ?Sized> Astrometry<'context, 'data, E, P> {
     /// Computes the Moon's apparent phase geometry and illuminated fraction at one epoch.
     ///
     /// The calculation solves separate one-way light-time paths from the Moon and Sun to Earth,

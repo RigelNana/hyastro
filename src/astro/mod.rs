@@ -5,7 +5,9 @@ mod astrometry;
 mod atmosphere;
 mod deflection;
 mod error;
+mod field_rotation;
 mod lunar;
+mod lunar_orientation;
 mod photometry;
 mod solar;
 
@@ -25,7 +27,15 @@ pub use atmosphere::{
 };
 pub use deflection::{SolarDeflectionDisposition, SolarLightDeflection};
 pub use error::Error;
+pub use field_rotation::{
+    FieldRotation, FieldRotationDirection, FieldRotationOptions, FieldRotationRate,
+    ParallacticAngle, ParallacticAngleAt,
+};
 pub use lunar::{IlluminatedFraction, LunarIllumination, MoonPhaseAngle, MoonPhaseBranch};
+pub use lunar_orientation::{
+    LunarDiskOrientation, LunarLibration, LunarPhysicalLibration, LunarRotation,
+    LunarRotationElements, LunarRotationModel,
+};
 pub use photometry::{GeocentricLunarVMagnitude, HorizonsCompatibleLunarV, LunarVApplicability};
 pub use solar::{
     ApparentSolarTime, EquationOfTime, MeanSolarTime, SolarApparentPlace, SolarTimeAtLongitude,

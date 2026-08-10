@@ -224,6 +224,18 @@ pub enum Error {
         /// Exclusive expiration instant in the same representation.
         expires: i128,
     },
+    /// A predicted Earth-attitude model was evaluated outside its validity.
+    #[error(
+        "predicted Earth orientation is valid on [{validity_start}, {validity_end}] TAI ns, not requested instant {requested} TAI ns"
+    )]
+    EarthOrientationPredictionOutsideValidity {
+        /// Requested instant as TAI nanoseconds since 1900-01-01 TAI.
+        requested: i128,
+        /// Inclusive model-validity start in the same representation.
+        validity_start: i128,
+        /// Inclusive model-validity end in the same representation.
+        validity_end: i128,
+    },
     /// Jiff rejected an adapter conversion.
     #[cfg(feature = "jiff")]
     #[error("jiff failed while {operation}: {reason}")]

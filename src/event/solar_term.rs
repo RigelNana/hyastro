@@ -4,6 +4,7 @@ use std::vec::Vec;
 
 use crate::{
     astro::SolarApparentPlace,
+    ephem::EphemerisProvider,
     frame::EclipticLongitude,
     math::Angle,
     time::{
@@ -320,7 +321,7 @@ impl SolarTermYear {
     }
 }
 
-impl<'context, 'data, E> Events<'context, 'data, E> {
+impl<'context, 'data, E, P: EphemerisProvider + ?Sized> Events<'context, 'data, E, P> {
     /// Finds every solar-term crossing in a closed physical-time interval.
     pub fn solar_terms_in<S: TimeScale>(
         &self,

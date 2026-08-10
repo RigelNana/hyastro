@@ -3,7 +3,7 @@ use core::{f64::consts::FRAC_PI_2, fmt};
 use crate::{
     catalog::{CatalogProperMotion, InfiniteCatalogPlace, SpatialCatalogPlace},
     earth::{FixedSite, SiteVelocityModel, TopocentricFrame},
-    ephem::{CelestialBody, Ephemeris, EphemerisQuery, RelativeState},
+    ephem::{CelestialBody, EphemerisProvider, EphemerisQuery, RelativeState},
     frame::{
         Bcrs, Cirs, EclipticDirectionAt, EclipticLatitude, EclipticLongitude, EquatorialDirection,
         EquatorialDirectionAt, FrameRotation, Frames, Gcrs, HorizontalDirection, Icrs,
@@ -11,13 +11,14 @@ use crate::{
     },
     math::{Angle, Declination, Direction, Length, RightAscension, Speed, Vector3},
     time::{
-        Duration, EarthAttitudeTable, EarthOrientationTable, Hifitime, Instant, JulianDate, Tcb,
+        Duration, EarthAttitudeModel, EarthOrientationTable, Hifitime, Instant, JulianDate, Tcb,
         Tdb, TimeContext, TimeScale, TimeScaleModel, Ut1,
     },
 };
 
 use super::{
-    AtmosphericConditions, Error, SolarApparentPlace, SolarLightDeflection, SolarTimeSolution,
+    AtmosphericConditions, Error, FieldRotation, FieldRotationOptions, ParallacticAngle,
+    ParallacticAngleAt, SolarApparentPlace, SolarLightDeflection, SolarTimeSolution,
 };
 
 /// Explicit convergence controls for one-way reception light time.
@@ -357,6 +358,23 @@ impl TerrestrialObservationParameters {
     }
 }
 
+fn parallactic_angle_sample<S: TimeScale>(
+    epoch: Instant<S>,
+    intermediate: EquatorialDirectionAt<Cirs, S>,
+    parameters: TerrestrialObservationParameters,
+) -> Result<ParallacticAngleAt<S>, Error> {
+    let coordinates = intermediate.coordinates();
+    let hour_angle =
+        parameters.local_earth_rotation_angle - coordinates.right_ascension().as_radians();
+    let angle = ParallacticAngle::from_components(
+        hour_angle,
+        coordinates.declination().as_radians(),
+        parameters.latitude_sine,
+        parameters.latitude_cosine,
+    )?;
+    Ok(ParallacticAngleAt::new(epoch, angle))
+}
+
 #[derive(Debug, Clone, Copy)]
 struct BarycentricObserverState<S: TimeScale> {
     position: Vector3<Bcrs, Length>,
@@ -395,8 +413,8 @@ struct SolarDeflectionComputation<S: TimeScale> {
     sun_reception_position: Vector3<Bcrs, Length>,
 }
 
-fn apply_finite_solar_light_deflection<S: TimeScale>(
-    ephemeris: &Ephemeris,
+fn apply_finite_solar_light_deflection<S: TimeScale, P: EphemerisProvider + ?Sized>(
+    ephemeris: &P,
     input: SolarDeflectionInput<S>,
 ) -> Result<SolarDeflectionComputation<S>, Error> {
     if input.target == CelestialBody::Sun {
@@ -714,6 +732,11 @@ impl<S: TimeScale, C: Copy> VacuumObservedCatalogPlace<S, C> {
         self.horizontal
     }
 
+    /// Returns the vacuum parallactic angle at this observation epoch.
+    pub fn parallactic_angle(self) -> Result<ParallacticAngleAt<S>, Error> {
+        parallactic_angle_sample(self.epoch(), self.intermediate, self.observation_parameters)
+    }
+
     /// Returns structured observer-dependent correction magnitudes.
     pub const fn corrections(self) -> CatalogPlaceCorrections {
         self.corrections
@@ -780,6 +803,11 @@ impl<S: TimeScale, C: Copy> ObservedCatalogPlace<S, C> {
         self.horizontal
     }
 
+    /// Returns the parallactic angle from the preceding vacuum astrometric stage.
+    pub fn parallactic_angle(self) -> Result<ParallacticAngleAt<S>, Error> {
+        self.vacuum.parallactic_angle()
+    }
+
     /// Returns the atmospheric inputs used by SOFA.
     pub const fn atmospheric_conditions(self) -> AtmosphericConditions {
         self.conditions
@@ -802,16 +830,24 @@ pub type ObservedSpatialCatalogPlace<S> = ObservedCatalogPlace<S, SpatialCatalog
 /// The value freezes the site's GCRS state, its observed GCRS-to-CIRS attitude,
 /// barycentric state, and SOFA observation parameters so multiple targets at
 /// the same site and epoch can reuse this preparation.
-#[derive(Debug, Clone, Copy)]
-pub struct FixedObserverAt<'ephemeris, S: TimeScale> {
-    ephemeris: &'ephemeris Ephemeris,
+#[derive(Debug)]
+pub struct FixedObserverAt<'ephemeris, S: TimeScale, P: EphemerisProvider + ?Sized> {
+    ephemeris: &'ephemeris P,
     topocentric_frame: TopocentricFrame<S>,
     gcrs_to_cirs: FrameRotation<Gcrs, Cirs, S>,
     barycentric: BarycentricObserverState<S>,
     parameters: sofars::astro::IauAstrom,
 }
 
-impl<S: TimeScale> FixedObserverAt<'_, S> {
+impl<S: TimeScale, P: EphemerisProvider + ?Sized> Copy for FixedObserverAt<'_, S, P> {}
+
+impl<S: TimeScale, P: EphemerisProvider + ?Sized> Clone for FixedObserverAt<'_, S, P> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S: TimeScale, P: EphemerisProvider + ?Sized> FixedObserverAt<'_, S, P> {
     /// Returns the fixed reception epoch.
     pub const fn epoch(self) -> Instant<S> {
         self.barycentric.epoch
@@ -1087,6 +1123,25 @@ impl<S: TimeScale> FixedObserverAt<'_, S> {
     }
 }
 
+fn field_rotation_from_fixed_observers<S: TimeScale, P: EphemerisProvider + ?Sized>(
+    previous: FixedObserverAt<'_, S, P>,
+    current: FixedObserverAt<'_, S, P>,
+    next: FixedObserverAt<'_, S, P>,
+    target: CelestialBody,
+    light_time_options: ReceptionLightTimeOptions,
+) -> Result<FieldRotation<S>, Error> {
+    let previous = previous
+        .vacuum_observed_place(target, light_time_options)?
+        .parallactic_angle()?;
+    let current = current
+        .vacuum_observed_place(target, light_time_options)?
+        .parallactic_angle()?;
+    let next = next
+        .vacuum_observed_place(target, light_time_options)?
+        .parallactic_angle()?;
+    FieldRotation::from_symmetric_samples(previous, current, next)
+}
+
 /// A finite target's topocentric vacuum observed place.
 ///
 /// The target is evaluated at the retained emission epoch and the fixed site
@@ -1137,6 +1192,15 @@ impl<S: TimeScale> VacuumObservedPlace<S> {
     /// Returns local vacuum azimuth and altitude.
     pub const fn horizontal(self) -> HorizontalDirection {
         self.horizontal
+    }
+
+    /// Returns the vacuum parallactic angle at this observation epoch.
+    pub fn parallactic_angle(self) -> Result<ParallacticAngleAt<S>, Error> {
+        parallactic_angle_sample(
+            self.reception_epoch(),
+            self.intermediate,
+            self.observation_parameters,
+        )
     }
 
     /// Returns target-at-emission to site-at-reception distance.
@@ -1300,6 +1364,11 @@ impl<S: TimeScale> ObservedPlace<S> {
         self.horizontal
     }
 
+    /// Returns the parallactic angle from the preceding vacuum astrometric stage.
+    pub fn parallactic_angle(self) -> Result<ParallacticAngleAt<S>, Error> {
+        self.vacuum.parallactic_angle()
+    }
+
     /// Returns the atmospheric observations supplied for this result.
     pub const fn atmospheric_conditions(self) -> AtmosphericConditions {
         self.conditions
@@ -1311,26 +1380,25 @@ impl<S: TimeScale> ObservedPlace<S> {
     }
 }
 
-/// Astrometric correction algorithms backed by one time context and ephemeris.
-pub struct Astrometry<'context, 'data, E> {
+/// Astrometric correction algorithms backed by one time context and ephemeris provider.
+pub struct Astrometry<'context, 'data, E, P: EphemerisProvider + ?Sized> {
     time: &'context TimeContext<'data, E>,
-    ephemeris: &'context Ephemeris,
+    ephemeris: &'context P,
 }
 
-impl<'context, 'data, E> Copy for Astrometry<'context, 'data, E> {}
+impl<'context, 'data, E, P: EphemerisProvider + ?Sized> Copy for Astrometry<'context, 'data, E, P> {}
 
-impl<'context, 'data, E> Clone for Astrometry<'context, 'data, E> {
+impl<'context, 'data, E, P: EphemerisProvider + ?Sized> Clone
+    for Astrometry<'context, 'data, E, P>
+{
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'context, 'data, E> Astrometry<'context, 'data, E> {
+impl<'context, 'data, E, P: EphemerisProvider + ?Sized> Astrometry<'context, 'data, E, P> {
     /// Constructs astrometric algorithms from explicit immutable dependencies.
-    pub const fn new(
-        time: &'context TimeContext<'data, E>,
-        ephemeris: &'context Ephemeris,
-    ) -> Self {
+    pub const fn new(time: &'context TimeContext<'data, E>, ephemeris: &'context P) -> Self {
         Self { time, ephemeris }
     }
 
@@ -1339,8 +1407,8 @@ impl<'context, 'data, E> Astrometry<'context, 'data, E> {
         self.time
     }
 
-    /// Returns the ephemeris used for geometric state evaluation.
-    pub const fn ephemeris(self) -> &'context Ephemeris {
+    /// Returns the ephemeris provider used for geometric state evaluation.
+    pub const fn ephemeris(self) -> &'context P {
         self.ephemeris
     }
 
@@ -1611,7 +1679,7 @@ impl<'context, 'data, E> Astrometry<'context, 'data, E> {
         earth_rotation_angle_radians: f64,
         polar_motion_x_radians: f64,
         polar_motion_y_radians: f64,
-    ) -> Result<FixedObserverAt<'context, S>, Error> {
+    ) -> Result<FixedObserverAt<'context, S, P>, Error> {
         let epoch = topocentric_frame.epoch();
         let barycentre = CelestialBody::SolarSystemBarycenter;
         let earth_barycentric =
@@ -1703,7 +1771,9 @@ impl<'context, 'data, E> Astrometry<'context, 'data, E> {
     }
 }
 
-impl<'context, 'data, 'eop> Astrometry<'context, 'data, EarthOrientationTable<'eop>> {
+impl<'context, 'data, 'eop, P: EphemerisProvider + ?Sized>
+    Astrometry<'context, 'data, EarthOrientationTable<'eop>, P>
+{
     /// Prepares one reusable fixed-site observer at a reception epoch.
     ///
     /// The construction requires complete observed EOP because the resulting
@@ -1713,7 +1783,7 @@ impl<'context, 'data, 'eop> Astrometry<'context, 'data, EarthOrientationTable<'e
         &self,
         site: &FixedSite,
         epoch: Instant<S>,
-    ) -> Result<FixedObserverAt<'context, S>, Error> {
+    ) -> Result<FixedObserverAt<'context, S, P>, Error> {
         let earth_orientation = Frames::new(self.time).earth_orientation_at(epoch)?;
         let topocentric_frame = site.topocentric_frame_from_orientation(earth_orientation)?;
         let observations = earth_orientation.observations();
@@ -1727,33 +1797,78 @@ impl<'context, 'data, 'eop> Astrometry<'context, 'data, EarthOrientationTable<'e
             observations.polar_motion_y().as_angle().as_radians(),
         )
     }
+
+    /// Computes the finite target's observed field rotation at a fixed site.
+    ///
+    /// Three complete astrometric solutions are evaluated symmetrically around
+    /// `epoch`. Tabulated length of day and frame rates therefore contribute to
+    /// both the observer state and the resulting parallactic-angle derivative.
+    pub fn field_rotation_at<S: TimeScale>(
+        &self,
+        site: &FixedSite,
+        target: CelestialBody,
+        epoch: Instant<S>,
+        light_time_options: ReceptionLightTimeOptions,
+        options: FieldRotationOptions,
+    ) -> Result<FieldRotation<S>, Error> {
+        let offset = options.sample_offset();
+        let previous = self.fixed_observer_at(site, epoch.checked_sub(offset)?)?;
+        let current = self.fixed_observer_at(site, epoch)?;
+        let next = self.fixed_observer_at(site, epoch.checked_add(offset)?)?;
+        field_rotation_from_fixed_observers(previous, current, next, target, light_time_options)
+    }
 }
 
-impl<'context, 'data, 'eop> Astrometry<'context, 'data, EarthAttitudeTable<'eop>> {
-    /// Prepares a fixed-site observer using observed attitude and nominal Earth rotation.
+impl<'context, 'data, E: EarthAttitudeModel, P: EphemerisProvider + ?Sized>
+    Astrometry<'context, 'data, E, P>
+{
+    /// Prepares a fixed-site observer using tabulated or predicted attitude and nominal rotation.
     ///
-    /// The returned observer retains `UT1−UTC`, polar motion, and celestial-pole
-    /// corrections. Its site velocity explicitly uses the IERS conventional
-    /// nominal angular speed because this context carries no length-of-day
-    /// observation.
+    /// The returned observer retains the selected UT1, polar motion, and
+    /// celestial-pole corrections. Site velocity explicitly uses the IERS
+    /// conventional nominal angular speed because this capability carries no
+    /// measured length-of-day value.
     pub fn fixed_observer_with_nominal_rotation_at<S: TimeScale>(
         &self,
         site: &FixedSite,
         epoch: Instant<S>,
-    ) -> Result<FixedObserverAt<'context, S>, Error> {
+    ) -> Result<FixedObserverAt<'context, S, P>, Error> {
         let attitude = Frames::new(self.time).earth_attitude_at(epoch)?;
         let topocentric_frame =
             site.topocentric_frame_from_attitude_with_nominal_rotation(attitude)?;
-        let observations = attitude.observations();
+        let attitude_state = attitude.earth_attitude();
         self.fixed_observer_from_topocentric_frame(
             site,
             topocentric_frame,
             attitude.gcrs_to_cirs(),
             attitude.tio_locator().as_radians(),
             attitude.earth_rotation_angle().as_radians(),
-            observations.polar_motion_x().as_angle().as_radians(),
-            observations.polar_motion_y().as_angle().as_radians(),
+            attitude_state.polar_motion_x().as_angle().as_radians(),
+            attitude_state.polar_motion_y().as_angle().as_radians(),
         )
+    }
+
+    /// Computes field rotation with the IERS nominal Earth angular speed.
+    ///
+    /// This variant accepts any tabulated or predicted [`EarthAttitudeModel`].
+    /// It retains UT1, polar motion, and celestial-pole corrections, but uses
+    /// nominal rotation because the model capability does not promise observed
+    /// length of day.
+    pub fn field_rotation_with_nominal_earth_rotation_at<S: TimeScale>(
+        &self,
+        site: &FixedSite,
+        target: CelestialBody,
+        epoch: Instant<S>,
+        light_time_options: ReceptionLightTimeOptions,
+        options: FieldRotationOptions,
+    ) -> Result<FieldRotation<S>, Error> {
+        let offset = options.sample_offset();
+        let previous =
+            self.fixed_observer_with_nominal_rotation_at(site, epoch.checked_sub(offset)?)?;
+        let current = self.fixed_observer_with_nominal_rotation_at(site, epoch)?;
+        let next =
+            self.fixed_observer_with_nominal_rotation_at(site, epoch.checked_add(offset)?)?;
+        field_rotation_from_fixed_observers(previous, current, next, target, light_time_options)
     }
 }
 

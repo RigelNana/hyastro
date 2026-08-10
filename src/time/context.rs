@@ -1,10 +1,9 @@
-use crate::constants::time::TT_MINUS_TAI_NANOSECONDS;
-
 use super::{
-    Calendar, CivilDateTime, Date, DateTime, DeltaT, Duration, EarthAttitude, EarthAttitudeTable,
-    EarthOrientation, EarthOrientationTable, EarthRotation, EarthRotationTable, Error,
-    FixedUtcOffset, Gps, Gregorian, Instant, JulianDate, LeapSeconds, Tai, TimeOfDay, TimeScale,
-    Tt, Ut1, Ut1MinusUtc, Utc,
+    Calendar, CivilDateTime, Date, DateTime, DeltaT, Duration, EarthAttitude, EarthAttitudeModel,
+    EarthAttitudeModelProvenance, EarthAttitudeState, EarthAttitudeTable, EarthOrientation,
+    EarthOrientationTable, EarthRotation, EarthRotationTable, Error, FixedUtcOffset, Gps,
+    Gregorian, Instant, JulianDate, LeapSeconds, PredictedEarthOrientation, Tai, TimeOfDay,
+    TimeScale, Tt, Ut1, Ut1MinusUtc, Utc,
 };
 
 pub(crate) mod sealed {
@@ -83,6 +82,20 @@ impl<'a> TimeContext<'a, NoEarthOrientation> {
         TimeContext {
             leap_seconds: self.leap_seconds,
             earth_orientation: earth_attitude,
+        }
+    }
+
+    /// Adds an explicit Delta T and pole-offset prediction scenario.
+    ///
+    /// UT1 and direction rotations then remain available without a future UTC
+    /// or leap-second scenario. Fixed-site velocity uses nominal Earth rotation.
+    pub const fn with_predicted_earth_orientation<'e>(
+        self,
+        prediction: PredictedEarthOrientation<'e>,
+    ) -> TimeContext<'a, PredictedEarthOrientation<'e>> {
+        TimeContext {
+            leap_seconds: self.leap_seconds,
+            earth_orientation: prediction,
         }
     }
 
@@ -225,12 +238,19 @@ impl<'a, E> TimeContext<'a, E> {
         epoch: Instant<S>,
         ut1_minus_utc: Ut1MinusUtc,
     ) -> Result<DeltaT<S>, Error> {
-        let tt_minus_tai = Duration::from_nanoseconds(TT_MINUS_TAI_NANOSECONDS);
-        let tai_minus_utc = self.leap_seconds.offset(epoch.retag::<Tai>())?;
-        let tt_minus_ut1 = tt_minus_tai
-            .checked_add(tai_minus_utc)?
-            .checked_sub(ut1_minus_utc.as_duration())?;
-        Ok(DeltaT::new(epoch, tt_minus_ut1))
+        DeltaT::from_ut1_minus_utc(epoch, ut1_minus_utc, self.leap_seconds)
+    }
+
+    fn julian_date_from_delta_t<From: TimeScale>(
+        &self,
+        instant: Instant<From>,
+        delta_t: DeltaT<From>,
+    ) -> Result<JulianDate<Ut1>, Error> {
+        let terrestrial_time = self.uniform_julian_date::<From, Tt>(instant)?;
+        let universal_time =
+            terrestrial_time.checked_add_duration(delta_t.tt_minus_ut1().checked_neg()?)?;
+        let (first, second) = universal_time.parts();
+        JulianDate::from_parts(first, second)
     }
 
     fn nominal_nanoseconds(date: Date<Gregorian>, time: TimeOfDay) -> Result<i128, Error> {
@@ -300,12 +320,6 @@ impl<'a, 'e> TimeContext<'a, EarthAttitudeTable<'e>> {
     ) -> Result<EarthAttitude<S>, Error> {
         self.earth_orientation.at(instant, self.leap_seconds)
     }
-
-    /// Resolves Delta T, `TT−UT1`, from this context's Earth-attitude data.
-    pub fn delta_t_at<S: TimeScale>(&self, instant: Instant<S>) -> Result<DeltaT<S>, Error> {
-        let attitude = self.earth_attitude_at(instant)?;
-        self.delta_t_from_ut1_minus_utc(instant, attitude.ut1_minus_utc())
-    }
 }
 
 impl<'a, 'e> TimeContext<'a, EarthOrientationTable<'e>> {
@@ -321,11 +335,31 @@ impl<'a, 'e> TimeContext<'a, EarthOrientationTable<'e>> {
     ) -> Result<EarthOrientation<S>, Error> {
         self.earth_orientation.at(instant, self.leap_seconds)
     }
+}
 
-    /// Resolves Delta T, `TT−UT1`, from this context's complete EOP data.
+impl<'a, E: EarthAttitudeModel> TimeContext<'a, E> {
+    /// Resolves all direction-level Earth-attitude quantities at one instant.
+    pub fn earth_attitude_state_at<S: TimeScale>(
+        &self,
+        instant: Instant<S>,
+    ) -> Result<EarthAttitudeState<S>, Error> {
+        let terrestrial_time = self.uniform_julian_date::<S, Tt>(instant)?;
+        super::earth_attitude::model::Sealed::earth_attitude_state_at(
+            self.earth_orientation,
+            instant,
+            terrestrial_time,
+            self.leap_seconds,
+        )
+    }
+
+    /// Returns the complete table or prediction-scenario provenance.
+    pub fn earth_attitude_provenance(&self) -> EarthAttitudeModelProvenance<'_> {
+        super::earth_attitude::model::Sealed::earth_attitude_provenance(&self.earth_orientation)
+    }
+
+    /// Resolves Delta T, `TT−UT1`, without requiring UTC for predicted models.
     pub fn delta_t_at<S: TimeScale>(&self, instant: Instant<S>) -> Result<DeltaT<S>, Error> {
-        let orientation = self.earth_orientation_at(instant)?;
-        self.delta_t_from_ut1_minus_utc(instant, orientation.ut1_minus_utc())
+        Ok(self.earth_attitude_state_at(instant)?.delta_t())
     }
 }
 
@@ -399,28 +433,42 @@ impl TimeScaleModel<Ut1> for TimeContext<'_, EarthRotationTable<'_>> {
 
 impl TimeScaleModel<Ut1> for TimeContext<'_, EarthAttitudeTable<'_>> {
     fn validate_instant<From: TimeScale>(&self, instant: Instant<From>) -> Result<(), Error> {
-        self.earth_attitude_at(instant).map(|_| ())
+        self.earth_attitude_state_at(instant).map(|_| ())
     }
 
     fn julian_date_at<From: TimeScale>(
         &self,
         instant: Instant<From>,
     ) -> Result<JulianDate<Ut1>, Error> {
-        let attitude = self.earth_attitude_at(instant)?;
-        self.julian_date_from_ut1_offset(instant, attitude.ut1_minus_utc())
+        let attitude = self.earth_attitude_state_at(instant)?;
+        self.julian_date_from_delta_t(instant, attitude.delta_t())
     }
 }
 
 impl TimeScaleModel<Ut1> for TimeContext<'_, EarthOrientationTable<'_>> {
     fn validate_instant<From: TimeScale>(&self, instant: Instant<From>) -> Result<(), Error> {
-        self.earth_orientation_at(instant).map(|_| ())
+        self.earth_attitude_state_at(instant).map(|_| ())
     }
 
     fn julian_date_at<From: TimeScale>(
         &self,
         instant: Instant<From>,
     ) -> Result<JulianDate<Ut1>, Error> {
-        let orientation = self.earth_orientation_at(instant)?;
-        self.julian_date_from_ut1_offset(instant, orientation.ut1_minus_utc())
+        let attitude = self.earth_attitude_state_at(instant)?;
+        self.julian_date_from_delta_t(instant, attitude.delta_t())
+    }
+}
+
+impl TimeScaleModel<Ut1> for TimeContext<'_, PredictedEarthOrientation<'_>> {
+    fn validate_instant<From: TimeScale>(&self, instant: Instant<From>) -> Result<(), Error> {
+        self.earth_attitude_state_at(instant).map(|_| ())
+    }
+
+    fn julian_date_at<From: TimeScale>(
+        &self,
+        instant: Instant<From>,
+    ) -> Result<JulianDate<Ut1>, Error> {
+        let attitude = self.earth_attitude_state_at(instant)?;
+        self.julian_date_from_delta_t(instant, attitude.delta_t())
     }
 }

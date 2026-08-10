@@ -17,6 +17,9 @@ help: the following other types implement trait `TimeScaleModel<S>`
 ...
   | impl TimeScaleModel<Ut1> for TimeContext<'_, EarthOrientationTable<'_>> {
   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `TimeContext<'_, EarthOrientationTable<'_>>`
+...
+  | impl TimeScaleModel<Ut1> for TimeContext<'_, PredictedEarthOrientation<'_>> {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `TimeContext<'_, PredictedEarthOrientation<'_>>`
 note: required by a bound in `hyastro::time::Instant::<S>::from_instant`
  --> src/time/instant.rs
   |

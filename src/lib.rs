@@ -6,13 +6,13 @@
 
 mod constants;
 
-#[cfg(feature = "anise")]
+#[cfg(feature = "std")]
 pub mod astro;
 pub mod catalog;
 #[cfg(feature = "std")]
 pub mod earth;
 pub mod ephem;
-#[cfg(feature = "anise")]
+#[cfg(feature = "std")]
 pub mod event;
 pub mod frame;
 pub mod math;

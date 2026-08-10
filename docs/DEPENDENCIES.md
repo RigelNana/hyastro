@@ -289,10 +289,10 @@ ANISE 0.10.4 满足"生产级 SPICE/DAF/SPK/PCK/参考系后端"定位：纯 Rus
 
 #### 3.2.4 hifitime —— **确定采用**（P0）
 
-- 用途：可选 `hifitime` adapter，为 hyastro 强类型时间值提供 TAI/TT/TDB/TCG/TCB/GPS 数值转换、上游 `Epoch` 互操作和交叉验证。UTC 标签解析由 hyastro 的版本化 `LeapSeconds` 决定，不把 Hifitime 的内嵌表作为公开语义。
-- 版本约束：`hifitime = { version = "4.3", default-features = false, optional = true }`。约束 `"4.3"` 允许 4.3.x 内跟进，ANISE workspace 的 `"4.3.0"` 与之兼容；关闭 `hifitime` feature 时，hyastro 的历法、时长、时刻、JD/MJD 和 `LeapSeconds` 仍可独立构建。
-- features：hyastro 的 `hifitime` feature 显式启用依赖；`std` 只在依赖已启用时传播 `hifitime/std`。**不开** `ut1`（ureq 联网下载 EOP）、`lts`（联网比对 IANA 闰秒）、`python`；核心 `LeapSeconds` 不依赖这些 feature。
-- no_std：支持（`#![cfg_attr(not(feature = "std"), no_std)]`，`ref/hifitime/src/lib.rs:3`）；hyastro 的 `no_std` 内核（F-PLAT-003）可关 std 使用时间表示子集。
+- 用途：为 hyastro 强类型时间值提供 TAI/TT/TDB/TCG/TCB/GPS 数值转换、上游 `Epoch` 互操作和交叉验证。默认 `std` 的天体测量/解析星历路径需要 TCB/TDB 转换，因此随 `std` 启用；裁剪构建也可单独选择 `hifitime` feature。UTC 标签解析仍由 hyastro 的版本化 `LeapSeconds` 决定，不把 Hifitime 的内嵌表作为公开语义。
+- 版本约束：`hifitime = { version = "4.3", default-features = false, optional = true }`。约束 `"4.3"` 允许 4.3.x 内跟进，ANISE workspace 的 `"4.3.0"` 与之兼容；依赖仍以 Cargo optional 形式存在，由 `std`、`hifitime` 或 `anise` 功能图显式激活。
+- features：hyastro 的默认 `std` feature 启用依赖及 `hifitime/std`；独立 `hifitime` feature 启用依赖本身。**不开** `ut1`（ureq 联网下载 EOP）、`lts`（联网比对 IANA 闰秒）、`python`；核心 `LeapSeconds` 不依赖这些 feature。
+- no_std：Hifitime 支持 `no_std`（`ref/hifitime/src/lib.rs:3`）；hyastro 的 `--no-default-features` 核心不拉取该依赖，显式 `hifitime` 的裁剪组合可使用其无标准库子集。
 - unsafe/FFI：0 处 unsafe；Kani 形式化验证工作流（`.github/workflows/formal_verification.yml`）。
 - 许可：MPL-2.0（`ref/hifitime/LICENSE.txt`）。MSRV：manifest 无 `rust-version`；CI 以 1.85 为 MSRV；std 路径经 snafu `rust_1_81` 实需 1.81+。平台：全平台（含 wasm，`web-time` 提供时钟）。
 - 为何保留：相对论时间尺度转换正确性极难自证；Hifitime 有 Kani 验证、完整测试以及与 SPICE 的 ET/UTC 对照，可作为算法 adapter 和独立校验源。闰秒版本、覆盖和过期属于 hyastro 领域不变量，因此由 hyastro 自己保存。
@@ -308,6 +308,7 @@ ANISE 0.10.4 满足"生产级 SPICE/DAF/SPK/PCK/参考系后端"定位：纯 Rus
 - unsafe/FFI：0 处 unsafe（纯 Rust 移植，`ref/sofars/src` grep 计数为 0）。许可：MIT + SOFA 许可条款（`ref/sofars/LICENSE` 附 SOFA 六条条款：派生命名不得含 `iau`/`sofa` 前缀——sofars 已合规；再分发需声明差异；出版物致谢）。
 - MSRV：README 徽章 1.85+（edition 2024 隐含）。平台：全平台。
 - 为何不自己实现：230/247 SOFA 函数 + 196 项对照 SOFA C 官方数值的测试（`ref/sofars/tests/`，容差体系 `tests/common/mod.rs`），自研即重造整个 SOFA 并失去权威对照。
+- 当前默认 `std` 路径把 `epv00`、`moon98` 和 `plan94` 封装为 `SofaAnalyticEphemeris`：通过 hyastro 自有 `EphemerisProvider` 返回 BCRS 相对状态、按目标组合求交的连续覆盖、稳定错误和模型 provenance，不暴露 sofars 数组。该后端覆盖 SSB/太阳/地球/月球及水星至海王星系统质心，公开 SOFA 的逐系统 PLAN94 误差统计，用于快速近似与无 BSP 测试；它不是 ANISE/JPL 后端的静默回退。
 - 替代项：rsofa（FFI 直绑，仅作 oracle）；erfa-sys/erfa（不完整/停更）；自建（成本高）。理由：纯 Rust、0 unsafe、官方数值测试、MPL-2.0 无关的宽松商用许可；唯一缺口是 17 个 `vm`/`ts` 工具函数（`cpv`/`p2s`/`rm2v`/`tf2d` 等，见 LIBRARY_RESEARCH 3.1），由 hyastro `math` 层补齐（约 100 行纯数学）。
 
 
@@ -315,7 +316,7 @@ ANISE 0.10.4 满足"生产级 SPICE/DAF/SPK/PCK/参考系后端"定位：纯 Rus
 
 #### 3.3.1 anise —— **可选 feature `anise`**（见第 2 节深入调研）
 
-- 决策要点复述：`anise = { version = "=0.10.4", default-features = false, optional = true }`；不启用 metaload/analysis/embed_ephem/python/validation；适配层私有持有 `Almanac`，公开类型自有。`astro` 的接收光行时链通过该适配层分别查询观测者接收状态和目标发射状态；真实 DE440s 契约测试再以 ANISE `CN_S` 方向作差分验证。版本/许可/MSRV/风险详见 2.2-2.13。
+- 决策要点复述：`anise = { version = "=0.10.4", default-features = false, optional = true }`；不启用 metaload/analysis/embed_ephem/python/validation；适配层私有持有 `Almanac`，公开具体类型为 `Ephemeris`，并实现与解析后端相同的 `EphemerisProvider`。`Astrometry` 和 `Events` 只通过该接缝查询观测者接收状态和目标发射状态；真实 DE440s 契约测试再以 ANISE `CN_S` 方向作差分验证。版本/许可/MSRV/风险详见 2.2-2.13。
 
 #### 3.3.2 winnow —— **可选 feature `text-parsing`**（P1/P2）
 

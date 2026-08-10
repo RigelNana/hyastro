@@ -7,7 +7,7 @@ error[E0308]: mismatched types
    |                    arguments to this method are incorrect
    |
    = note: expected struct `StandardUncertainty<hyastro::time::Duration>`
-              found struct `StandardUncertainty<Angle>`
+              found struct `StandardUncertainty<hyastro::math::Angle>`
 note: method defined here
   --> src/time/earth_rotation.rs
    |

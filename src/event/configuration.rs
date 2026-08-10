@@ -6,7 +6,7 @@ use std::vec::Vec;
 
 use crate::{
     earth::FixedSite,
-    ephem::CelestialBody,
+    ephem::{CelestialBody, EphemerisProvider},
     math::{Angle, AngularSpeed, Separation},
     time::{Duration, EarthOrientationTable, Instant, TimeInterval, TimeScale},
 };
@@ -857,7 +857,7 @@ impl<S: TimeScale, R: RelativeSampler<S>> StationSearch<S, R> {
     }
 }
 
-impl<'context, 'data, E> Events<'context, 'data, E> {
+impl<'context, 'data, E, P: EphemerisProvider + ?Sized> Events<'context, 'data, E, P> {
     /// Finds all geocentric conjunction, opposition, or quadrature events in a closed interval.
     pub fn configurations_in<S: TimeScale>(
         &self,
@@ -898,7 +898,9 @@ impl<'context, 'data, E> Events<'context, 'data, E> {
     }
 }
 
-impl<'context, 'data, 'eop> Events<'context, 'data, EarthOrientationTable<'eop>> {
+impl<'context, 'data, 'eop, P: EphemerisProvider + ?Sized>
+    Events<'context, 'data, EarthOrientationTable<'eop>, P>
+{
     /// Finds all fixed-site conjunction, opposition, or quadrature events in a closed interval.
     pub fn fixed_site_configurations_in<S: TimeScale>(
         &self,

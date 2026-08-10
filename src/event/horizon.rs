@@ -8,7 +8,7 @@ use crate::{
         VacuumObservedPlace,
     },
     earth::FixedSite,
-    ephem::{CelestialBody, SphericalBodyFigure},
+    ephem::{CelestialBody, EphemerisProvider, SphericalBodyFigure},
     math::{Altitude, Angle},
     time::{Duration, EarthAttitudeTable, EarthOrientationTable, Instant, TimeInterval, TimeScale},
 };
@@ -417,8 +417,8 @@ trait HorizonObserver {
     ) -> Result<VacuumObservedPlace<S>, crate::astro::Error>;
 }
 
-impl<'context, 'data, 'eop> HorizonObserver
-    for Astrometry<'context, 'data, EarthOrientationTable<'eop>>
+impl<'context, 'data, 'eop, P: EphemerisProvider + ?Sized> HorizonObserver
+    for Astrometry<'context, 'data, EarthOrientationTable<'eop>, P>
 {
     fn vacuum_observed_place<S: TimeScale>(
         &self,
@@ -432,8 +432,8 @@ impl<'context, 'data, 'eop> HorizonObserver
     }
 }
 
-impl<'context, 'data, 'eop> HorizonObserver
-    for Astrometry<'context, 'data, EarthAttitudeTable<'eop>>
+impl<'context, 'data, 'eop, P: EphemerisProvider + ?Sized> HorizonObserver
+    for Astrometry<'context, 'data, EarthAttitudeTable<'eop>, P>
 {
     fn vacuum_observed_place<S: TimeScale>(
         &self,
@@ -447,7 +447,9 @@ impl<'context, 'data, 'eop> HorizonObserver
     }
 }
 
-impl<'context, 'data, 'eop> Events<'context, 'data, EarthOrientationTable<'eop>> {
+impl<'context, 'data, 'eop, P: EphemerisProvider + ?Sized>
+    Events<'context, 'data, EarthOrientationTable<'eop>, P>
+{
     /// Finds finite-target rise, set, and transit events using observed Earth rotation.
     pub fn horizon_events_in<S: TimeScale>(
         &self,
@@ -461,7 +463,9 @@ impl<'context, 'data, 'eop> Events<'context, 'data, EarthOrientationTable<'eop>>
     }
 }
 
-impl<'context, 'data, 'eop> Events<'context, 'data, EarthAttitudeTable<'eop>> {
+impl<'context, 'data, 'eop, P: EphemerisProvider + ?Sized>
+    Events<'context, 'data, EarthAttitudeTable<'eop>, P>
+{
     /// Finds finite-target rise, set, and transit events using nominal Earth rotation.
     ///
     /// This path retains observed UT1, polar motion, and celestial-pole offsets,
@@ -479,7 +483,7 @@ impl<'context, 'data, 'eop> Events<'context, 'data, EarthAttitudeTable<'eop>> {
     }
 }
 
-impl<'context, 'data, E> Events<'context, 'data, E> {
+impl<'context, 'data, E, P: EphemerisProvider + ?Sized> Events<'context, 'data, E, P> {
     fn search_horizon_events_in<S: TimeScale>(
         &self,
         site: &FixedSite,
@@ -489,7 +493,7 @@ impl<'context, 'data, E> Events<'context, 'data, E> {
         options: HorizonSearchOptions,
     ) -> Result<HorizonEventSearch<S>, Error>
     where
-        Astrometry<'context, 'data, E>: HorizonObserver,
+        Astrometry<'context, 'data, E, P>: HorizonObserver,
     {
         let mut evaluations = 0_u32;
         let mut events = Vec::new();
@@ -639,7 +643,7 @@ impl<'context, 'data, E> Events<'context, 'data, E> {
         evaluations: &mut u32,
     ) -> Result<HorizonSample<S>, Error>
     where
-        Astrometry<'context, 'data, E>: HorizonObserver,
+        Astrometry<'context, 'data, E, P>: HorizonObserver,
     {
         if *evaluations >= options.max_evaluations() {
             return Err(Error::EvaluationLimitExceeded {
@@ -690,7 +694,7 @@ impl<'context, 'data, E> Events<'context, 'data, E> {
         evaluations: &mut u32,
     ) -> Result<HorizonEvent<S>, Error>
     where
-        Astrometry<'context, 'data, E>: HorizonObserver,
+        Astrometry<'context, 'data, E, P>: HorizonObserver,
     {
         let evaluations_before = *evaluations;
         let root = BracketedRootSearch::refine(

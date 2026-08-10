@@ -256,7 +256,28 @@ fn finals_parser_prefers_bulletin_b_and_preserves_prediction_gaps() {
     let solution = Frames::new(&attitude_time)
         .earth_attitude_at(attitude_samples[0].epoch())
         .unwrap();
-    assert_eq!(solution.observations(), attitude);
+    let resolved_attitude = solution.earth_attitude();
+    assert_eq!(resolved_attitude.epoch(), attitude.epoch());
+    assert_eq!(
+        resolved_attitude.ut1_minus_utc(),
+        Some(attitude.ut1_minus_utc())
+    );
+    assert_eq!(
+        resolved_attitude.polar_motion_x(),
+        attitude.polar_motion_x()
+    );
+    assert_eq!(
+        resolved_attitude.polar_motion_y(),
+        attitude.polar_motion_y()
+    );
+    assert_eq!(
+        resolved_attitude.celestial_pole_offset_x(),
+        attitude.celestial_pole_offset_x()
+    );
+    assert_eq!(
+        resolved_attitude.celestial_pole_offset_y(),
+        attitude.celestial_pole_offset_y()
+    );
     let site = Earth::wgs84()
         .fixed_site(
             "missing-LOD fallback",
@@ -295,7 +316,7 @@ fn finals_parser_prefers_bulletin_b_and_preserves_prediction_gaps() {
         .apply_vector(gcrs_state.velocity())
         .unwrap()
         .components();
-    let observations = solution.observations();
+    let observations = solution.earth_attitude();
     let geodetic = site.geodetic_position();
     let mut sofa_pv = [[0.0; 3]; 2];
     sofars::astro::pvtob(
@@ -457,6 +478,37 @@ fn sidereal_time_uses_current_ut1_without_requiring_length_of_day() {
         expected_local,
         epsilon = 1.0e-15
     );
+}
+
+#[test]
+fn latest_finals_snapshot_supplies_delta_t_through_2026() {
+    let base = TimeContext::builtin();
+    let data = IersFinals2000A::parse(FINALS_2000_A).unwrap();
+    let samples = data
+        .try_earth_rotation_samples_in(
+            &base,
+            ModifiedJulianDate::<Utc>::from_parts(61_040.0, 0.0).unwrap(),
+            ModifiedJulianDate::<Utc>::from_parts(61_407.0, 0.0).unwrap(),
+            EarthOrientationAcceptance::IncludePredicted,
+        )
+        .unwrap();
+    let expires = samples[samples.len() - 1]
+        .epoch()
+        .checked_add(Duration::from_days(1).unwrap())
+        .unwrap();
+    let table =
+        EarthRotationTable::new(&samples, "finals2000A full-year 2026 UT1", expires).unwrap();
+    let time = base.with_earth_rotation(table);
+
+    for (month, day) in [(2, 17), (8, 12)] {
+        let epoch = time
+            .resolve(
+                DateTime::<Gregorian, Utc>::from_components(2026, month, day, 12, 0, 0, 0).unwrap(),
+            )
+            .unwrap();
+        let delta_t = time.delta_t_at(epoch).unwrap();
+        assert!((60.0..80.0).contains(&delta_t.as_seconds()));
+    }
 }
 
 #[test]

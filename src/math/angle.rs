@@ -590,7 +590,7 @@ impl Altitude {
             })
         }
     }
-    #[cfg(feature = "anise")]
+    #[cfg(feature = "std")]
     pub(crate) const fn from_finite(value: f64) -> Self {
         Self(value)
     }

@@ -3,7 +3,7 @@ use std::vec::Vec;
 
 use crate::{
     earth::FixedSite,
-    ephem::{CelestialBody, EphemerisQuery, RelativeState},
+    ephem::{CelestialBody, EphemerisProvider, EphemerisQuery, RelativeState},
     frame::{Bcrs, EclipticLatitude},
     math::{Angle, Declination, Length, Separation},
     time::{Duration, EarthOrientationTable, Instant, TimeInterval, TimeScale},
@@ -536,14 +536,14 @@ impl<S: TimeScale, R: RelativeSampler<S>> SeparationExtremumSearch<S, R> {
     }
 }
 
-struct DistanceExtremumSearch<'ephemeris, S: TimeScale> {
-    ephemeris: &'ephemeris crate::ephem::Ephemeris,
+struct DistanceExtremumSearch<'ephemeris, S: TimeScale, P: EphemerisProvider + ?Sized> {
+    ephemeris: &'ephemeris P,
     interval: TimeInterval<S>,
     query: DistanceExtremumQuery,
     options: ExtremumSearchOptions,
 }
 
-impl<S: TimeScale> DistanceExtremumSearch<'_, S> {
+impl<S: TimeScale, P: EphemerisProvider + ?Sized> DistanceExtremumSearch<'_, S, P> {
     fn events(self) -> Result<Vec<DistanceExtremumEvent<S>>, Error> {
         let maximum = self.options.max_evaluations();
         SampledExtremumSearch::new(self.interval.start(), self.interval.end(), self.options)
@@ -767,7 +767,7 @@ impl<S: TimeScale, R: RelativeSampler<S>> CoordinateCrossingSearch<S, R> {
     }
 }
 
-impl<'context, 'data, E> Events<'context, 'data, E> {
+impl<'context, 'data, E, P: EphemerisProvider + ?Sized> Events<'context, 'data, E, P> {
     /// Finds all geocentric local minima or maxima of true angular separation.
     pub fn angular_separation_extrema_in<S: TimeScale>(
         &self,
@@ -837,7 +837,9 @@ impl<'context, 'data, E> Events<'context, 'data, E> {
     }
 }
 
-impl<'context, 'data, 'eop> Events<'context, 'data, EarthOrientationTable<'eop>> {
+impl<'context, 'data, 'eop, P: EphemerisProvider + ?Sized>
+    Events<'context, 'data, EarthOrientationTable<'eop>, P>
+{
     /// Finds all fixed-site local minima or maxima of true angular separation.
     pub fn fixed_site_angular_separation_extrema_in<S: TimeScale>(
         &self,
